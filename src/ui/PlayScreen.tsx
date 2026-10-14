@@ -34,6 +34,8 @@ interface Drag {
   preview: Preview | null;
   /** Client-space centre the piece animates back to after an illegal drop. */
   returning: { x: number; y: number } | null;
+  /** Dragged out of a rotation selection: where (and how rotated) it goes back to on an illegal drop. */
+  revertTo: Placement | null;
 }
 
 interface Pending {
@@ -52,6 +54,8 @@ interface Selection {
   legal: boolean;
   /** Square the domino turns around for the whole selection: its left (horizontal) or top (vertical) half. */
   pivot: CellId;
+  /** Placement when the selection began; an illegal drag-and-drop returns the domino here. */
+  original: Placement;
 }
 
 interface KeyboardMove {
@@ -202,9 +206,24 @@ export function PlayScreen({ puzzle, game, dispatch, settings, onSettings, onBac
         if (Math.hypot(e.clientX - pd.startX, e.clientY - pd.startY) < DRAG_THRESHOLD_PX) return;
         const g = gameRef.current;
         const placed = g.placements[pd.id];
-        const rot: Rotation = pd.source === 'board' && placed ? rotationOf(placed.cellA, placed.cellB) ?? 0 : g.trayRotation[pd.id] ?? 0;
+        // A domino being rotated is picked up in its current (possibly not yet legal) rotation.
+        const sel = selectionRef.current?.id === pd.id ? selectionRef.current : null;
+        const shown = sel ? sel.tentative : placed;
+        const rot: Rotation = pd.source === 'board' && shown ? rotationOf(shown.cellA, shown.cellB) ?? 0 : g.trayRotation[pd.id] ?? 0;
         clearSelection();
-        d = { id: pd.id, source: pd.source, rot, x: e.clientX, y: e.clientY, fx: pd.fx, fy: pd.fy, cellPx: cellPx(), preview: null, returning: null };
+        d = {
+          id: pd.id,
+          source: pd.source,
+          rot,
+          x: e.clientX,
+          y: e.clientY,
+          fx: pd.fx,
+          fy: pd.fy,
+          cellPx: cellPx(),
+          preview: null,
+          returning: null,
+          revertTo: sel ? sel.original : null,
+        };
       }
       const W = (d.rot % 2 === 0 ? 2 : 1) * d.cellPx;
       const H = (d.rot % 2 === 0 ? 1 : 2) * d.cellPx;
@@ -226,7 +245,9 @@ export function PlayScreen({ puzzle, game, dispatch, settings, onSettings, onBac
       if (!placed) return;
       const current = selectionRef.current;
       const fresh = !current || current.id !== id;
-      const sel: Selection = fresh ? { id, tentative: placed, legal: true, pivot: anchorOf(placed.cellA, placed.cellB) } : current;
+      const sel: Selection = fresh
+        ? { id, tentative: placed, legal: true, pivot: anchorOf(placed.cellA, placed.cellB), original: placed }
+        : current;
       let next: Selection;
       if (fresh && !rotateNow) {
         next = sel;
@@ -280,7 +301,17 @@ export function PlayScreen({ puzzle, game, dispatch, settings, onSettings, onBac
       }
       // Illegal drop: animate back to where the piece came from.
       let target: { x: number; y: number } | null = null;
-      const placed = gameRef.current.placements[d.id];
+      let placed = gameRef.current.placements[d.id];
+      let rot = d.rot;
+      if (d.source === 'board' && d.revertTo) {
+        // Dragged out of a rotation: restore the placement and rotation from before the selection.
+        const o = d.revertTo;
+        if (!placed || placed.cellA !== o.cellA || placed.cellB !== o.cellB) {
+          dispatch({ type: 'place', dominoId: d.id, cellA: o.cellA, cellB: o.cellB, now });
+        }
+        placed = o;
+        rot = rotationOf(o.cellA, o.cellB) ?? 0;
+      }
       if (d.source === 'board' && placed && svgRef.current) {
         const c = center(placed);
         target = boardToClient(svgRef.current, vb, c.x, c.y);
@@ -293,7 +324,7 @@ export function PlayScreen({ puzzle, game, dispatch, settings, onSettings, onBac
         setDrag(null);
         return;
       }
-      const back = { ...d, preview: null, returning: target };
+      const back = { ...d, rot, preview: null, returning: target };
       dragRef.current = back;
       setDrag(back);
       window.setTimeout(() => {
