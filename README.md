@@ -1,3 +1,5 @@
+<p align="center"><img src="icon.jpg" alt="Pips Build" width="200"></p>
+
 # Pips Build
 
 Pips Build turns a screenshot of a Pips-style domino logic puzzle into a board you can play in the browser.
