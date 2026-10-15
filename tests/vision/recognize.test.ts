@@ -6,7 +6,7 @@ import { checkConsistency } from '../../src/engine/puzzle';
 import { boardComponents } from '../../src/engine/geometry';
 import type { RGBAImage } from '../../src/vision/image';
 import type { Puzzle } from '../../src/engine/types';
-import { TRUTH, parseTruth, type Truth } from './groundTruth';
+import { TRUTH, parseTruth, truthFor, type Truth } from './groundTruth';
 
 function crop(img: RGBAImage, x0: number, y0: number, w: number, h: number): RGBAImage {
   const data = new Uint8ClampedArray(w * h * 4);
@@ -56,14 +56,14 @@ describe('screenshot reconstruction', () => {
   });
 
   it('does not depend on screenshot resolution (65% and 140%)', async () => {
-    const t = TRUTH[0];
+    const t = truthFor('game1.jpg');
     const img = loadImage(t.file);
     expectMatches((await recognize(scaleImage(img, 0.65))).puzzle, t);
     expectMatches((await recognize(scaleImage(img, 1.4))).puzzle, t);
   });
 
   it('works on a crop without browser chrome (desktop-style capture)', async () => {
-    for (const t of [TRUTH[1], TRUTH[4]]) {
+    for (const t of [truthFor('game2.jpg'), truthFor('game6.jpg')]) {
       const img = loadImage(t.file);
       const top = Math.round(img.height * 0.2);
       const res = await recognize(crop(img, 0, top, img.width, Math.round(img.height * 0.75)));

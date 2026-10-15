@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Pips Build: a browser-only React + TypeScript + Vite app that reconstructs a Pips-style domino puzzle from a screenshot and lets the user play it. Hard constraints: no backend, no remote OCR/AI, no uploads, and no NYT branding or assets (styling is original). The `game*.jpg` files in the root are the reference screenshots and the vision regression fixtures: phone captures plus desktop captures (`game5` = `game4`'s puzzle, `game8` = `game7`'s) at different scales and aspect ratios.
+Pips Build: a browser-only React + TypeScript + Vite app that reconstructs a Pips-style domino puzzle from a screenshot and lets the user play it. Hard constraints: no backend, no remote OCR/AI, no uploads, and no NYT branding or assets (styling is original). The `game*.jpg` files in the root are the reference screenshots and the vision regression fixtures: phone captures plus desktop captures (`game5` = `game4`'s puzzle, `game8` = `game7`'s) at different scales and aspect ratios. Each has its expected reconstruction in `tests/vision/expected/gameN.json`, written in the app's puzzle-file format (it opens in the app via "Import puzzle file").
 
 ## Commands
 
@@ -12,6 +12,7 @@ Pips Build: a browser-only React + TypeScript + Vite app that reconstructs a Pip
 - `npm test`: all Vitest suites. `npm run test:engine` / `npm run test:vision` run one side.
 - Single test: `npx vitest run tests/engine/game.test.ts -t "repair mode"`.
 - Stop the dev server before running the tests. With `npm run dev` running, every test file has failed to load ("no tests"); the cause hasn't been pinned down.
+- `npm run check:chrome`: runs the real in-browser pipeline (Chrome JPEG decode → worker → recognizer) on every screenshot and diffs it against its expected file. It starts its own dev server and uses the installed Chrome (`CHROME_PATH` overrides). Run it after any recognition change.
 - `npm run analyze [game1 game4 ...]`: prints each sample's reconstruction as ASCII (grid, regions, badges, dominoes, confidence). Use it when touching `src/vision`. `BROWSER=1` analyses the Chrome-decoded pixels instead; `SKIP=1` skips glyph classification and shows glyph counts.
 - `npm run train:glyphs`: regenerates `src/vision/glyphTemplates.ts` from the screenshots plus `tests/vision/groundTruth.ts` (Node decode, Chrome decode, and ×0.6/×0.45 downscales). It prints badges whose glyph count is wrong and a leave-one-puzzle-out accuracy check. Rerun it after any change to glyph extraction or features, and before running the vision tests.
 
@@ -33,7 +34,7 @@ Three layers. Game rules never live in React components.
   4. Cells: center-box coverage.
   5. Regions: adjacent cells are unioned when the seam between them matches both cells' colors (threshold 0.53; same-region seams score ≥ 0.7, boundaries ≤ 0.35). Unconstrained cells are detected by closeness to the neutral/frame color.
   6. Badges: strong-color mask → fill holes → morphological open (removes dashed borders) → components. Each badge maps to the region via `badgeCell`.
-  7. Glyphs: the badge crop is resampled to a fixed scale (`GLYPH_REF_PITCH`) using bilinear interpolation of a whiteness score `L − 2·C`. It's then thresholded adaptively per badge (between the badge color and the brightest text), restricted to the badge's own filled shape and its central zone (the badge notch holds pastel pockets), and split into characters. Fragments are re-merged and touching characters split. Glyphs are classified against `glyphTemplates.ts` (vocabulary `0–9 < > = ≠`).
+  7. Glyphs: the badge crop is resampled to a fixed scale (`GLYPH_REF_PITCH`) using bilinear interpolation of a whiteness score `L − 2·C`. It's then thresholded adaptively per badge (between the badge color and the brightest text), and restricted to the badge's own filled shape and its central zone (the badge notch holds pastel pockets). Pieces within a few pixels of each other are grouped (thin strokes of a small `>` break apart), then split into characters. Fragments are re-merged, and a blob too wide for its own height is split (touching digits). Three-character labels such as `>14` use a smaller font, so `normalizeLabelSize` rescales them to normal digit height before classification. Glyphs are classified against `glyphTemplates.ts` (vocabulary `0–9 < > = ≠`).
 
   Board connectivity counts badge and dash pixels as board. Otherwise a cell boxed in by borders and badges on every side can be cut off from its piece; this happened with Chrome's decode of `game6`.
 
@@ -44,11 +45,11 @@ Three layers. Game rules never live in React components.
 ## Tests
 
 - `tests/engine/*` cover the rules, the reducer and pip patterns.
-- `tests/vision/recognize.test.ts` asserts that every reference screenshot reconstructs exactly to `tests/vision/groundTruth.ts`, both as decoded by jpeg-js and as decoded by Chrome. The pixels differ slightly, so both must pass.
+- `tests/vision/recognize.test.ts` asserts that every reference screenshot reconstructs exactly to its `tests/vision/expected/gameN.json` (loaded by `groundTruth.ts`), both as decoded by jpeg-js and as decoded by Chrome. The pixels differ slightly, so both must pass.
 - `tests/vision/numbers.test.ts` repaints real badges with every value 0–24 and all operators, using real glyph pixels, and reads them at phone and desktop scale.
 - `tests/vision/solvable.test.ts` runs a backtracking solver (`tests/helpers/solver.ts`) to prove each recognized puzzle has a solution.
 
 To add a screenshot fixture:
-1. Add its truth entry to `groundTruth.ts`.
-2. Regenerate its Chrome-decoded PNG in `tests/vision/browser-decoded/`. This is a lossless dump of `loadImageFile()`'s ImageData, taken in Chrome from the running dev server.
-3. Run `npm run train:glyphs`, then `npm test`.
+1. Put `gameN.jpg` in the root. Write `tests/vision/expected/gameN.json`; the easiest way is to load the screenshot in the app, fix anything wrong in the editor, and use "Save puzzle to file". Keep the tray order of the dominoes.
+2. Add its Chrome-decoded PNG to `tests/vision/browser-decoded/gameN.png`. This is a lossless dump of `loadImageFile()`'s ImageData, taken in Chrome from the running dev server.
+3. Run `npm run train:glyphs`, then `npm test` (dev server stopped) and `npm run check:chrome`.

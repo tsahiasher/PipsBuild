@@ -5,7 +5,7 @@
  */
 import { existsSync, writeFileSync } from 'node:fs';
 import { browserDecoded, loadImage, scaleImage } from './load';
-import { recognize } from '../src/vision/recognize';
+import { normalizeLabelSize, recognize } from '../src/vision/recognize';
 import { badgeCell } from '../src/engine/puzzle';
 import { classifyGlyph, type GlyphFeatures, type GlyphTemplate } from '../src/vision/glyphs';
 import type { RGBAImage } from '../src/vision/image';
@@ -20,7 +20,7 @@ interface Sample {
 }
 
 /** Screenshots of the same puzzle share a key so leave-one-out never trains on the same badges. */
-const puzzleKey = (t: Truth) => JSON.stringify([t.grid, t.labels]);
+const puzzleKey = (t: Truth) => t.key;
 
 const samples: Sample[] = [];
 let mismatches = 0;
@@ -46,7 +46,9 @@ for (const t of TRUTH) {
         continue;
       }
       const small = res.geometry.pitch < 64;
-      [...label].forEach((ch, i) => samples.push({ puzzle: puzzleKey(t), ch, small, g: b.glyphs[i] }));
+      // Same size normalisation the recogniser applies to small-font (3-character) labels.
+      const glyphs = normalizeLabelSize(b.glyphs);
+      [...label].forEach((ch, i) => samples.push({ puzzle: puzzleKey(t), ch, small, g: glyphs[i] }));
     }
   }
 }

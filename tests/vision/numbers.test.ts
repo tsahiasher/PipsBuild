@@ -10,7 +10,7 @@ import { recognize, type DetectedBadge } from '../../src/vision/recognize';
 import { badgeCell } from '../../src/engine/puzzle';
 import { constraintLabel } from '../../src/engine/constraints';
 import { rgbToLab, type RGBAImage } from '../../src/vision/image';
-import { TRUTH, parseTruth, type Truth } from './groundTruth';
+import { parseTruth, truthFor, type Truth } from './groundTruth';
 
 interface GlyphSource {
   img: RGBAImage;
@@ -40,7 +40,7 @@ async function labelledBadges(t: Truth, img: RGBAImage) {
 async function glyphSources(): Promise<Map<string, GlyphSource>> {
   const sources = new Map<string, GlyphSource>();
   for (const name of ['game4', 'game6', 'game1', 'game2', 'game3', 'game7']) {
-    const t = TRUTH.find((x) => x.file === `${name}.jpg`)!;
+    const t = truthFor(`${name}.jpg`);
     const img = loadImage(browserDecoded(name));
     const { res, out } = await labelledBadges(t, img);
     for (const { badge, label } of out) {
@@ -135,7 +135,7 @@ const LABELS = [
 describe('condition values 0–24', () => {
   it('reads every sum from 0 to 24 and every operator, at phone and desktop scale', async () => {
     const sources = await glyphSources();
-    const base = TRUTH.find((t) => t.file === 'game4.jpg')!;
+    const base = truthFor('game4.jpg');
     const img = loadImage(browserDecoded('game4'));
     const { res, out } = await labelledBadges(base, img);
     expect(out.length).toBe(LABELS.length);

@@ -236,7 +236,7 @@ export async function recognize(img: RGBAImage, opts: RecognizeOptions = {}): Pr
     });
     const reg = best as Region | null;
     if (!opts.skipClassification) {
-      const cls = bd.glyphs.map((g) => classifyGlyph(g));
+      const cls = normalizeLabelSize(bd.glyphs).map((g) => classifyGlyph(g));
       bd.text = cls.map((c) => c.ch).join('');
       bd.confidence = cls.length ? Math.min(...cls.map((c) => c.confidence)) : 0;
       const constraint = parseConstraint(bd.text);
@@ -745,13 +745,49 @@ function extractGlyphs(
     }
   const { labels, comps } = labelComponents(white, bw, bh, true);
   const R = GLYPH_REF_PITCH;
+  // Pieces lying within a few pixels of each other belong to one character: thin strokes
+  // of a small ">" or "<" break apart under anti-aliasing. Size filters apply to the group.
+  interface Piece {
+    labels: Set<number>;
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+    area: number;
+    cx: number;
+    cy: number;
+  }
+  const near = 0.025 * R;
+  const pieces: Piece[] = comps
+    .filter((c) => c.x0 > 0 && c.y0 > 0 && c.x1 < bw - 1 && c.y1 < bh - 1)
+    .map((c) => ({ labels: new Set([c.label]), x0: c.x0, y0: c.y0, x1: c.x1, y1: c.y1, area: c.area, cx: c.cx, cy: c.cy }));
+  for (let merged = true; merged; ) {
+    merged = false;
+    for (let i = 0; i < pieces.length && !merged; i++)
+      for (let j = i + 1; j < pieces.length && !merged; j++) {
+        const a = pieces[i];
+        const b = pieces[j];
+        const dx = Math.max(0, a.x0 - b.x1, b.x0 - a.x1);
+        const dy = Math.max(0, a.y0 - b.y1, b.y0 - a.y1);
+        if (Math.max(dx, dy) > near) continue;
+        const area = a.area + b.area;
+        pieces[i] = {
+          labels: new Set([...a.labels, ...b.labels]),
+          x0: Math.min(a.x0, b.x0),
+          y0: Math.min(a.y0, b.y0),
+          x1: Math.max(a.x1, b.x1),
+          y1: Math.max(a.y1, b.y1),
+          area,
+          cx: (a.cx * a.area + b.cx * b.area) / area,
+          cy: (a.cy * a.area + b.cy * b.area) / area,
+        };
+        pieces.splice(j, 1);
+        merged = true;
+      }
+  }
   // Text sits in the middle of the badge; pockets in the badge's notch sit near its edge.
-  const inner = comps.filter(
+  const inner = pieces.filter(
     (c) =>
-      c.x0 > 0 &&
-      c.y0 > 0 &&
-      c.x1 < bw - 1 &&
-      c.y1 < bh - 1 &&
       c.area >= 0.0015 * R * R &&
       c.y1 - c.y0 + 1 >= 0.035 * R &&
       c.cx > 0.1 * bw &&
@@ -767,9 +803,10 @@ function extractGlyphs(
     x1: number;
   }
   inner.sort((a, b) => a.x0 - b.x0);
-  const byLabel = new Map(inner.map((c) => [c.label, c]));
+  const pieceOf = new Map<number, Piece>();
+  for (const c of inner) for (const l of c.labels) pieceOf.set(l, c);
   const glyphHeight = (g: Glyph) => {
-    const cs = [...g.labels].map((l) => byLabel.get(l)!);
+    const cs = [...g.labels].map((l) => pieceOf.get(l)!);
     return Math.max(...cs.map((c) => c.y1)) - Math.min(...cs.map((c) => c.y0)) + 1;
   };
   const groups: Glyph[] = [];
@@ -780,10 +817,10 @@ function extractGlyphs(
       return ov > 0.5 * Math.min(gr.x1 - gr.x0, c.x1 - c.x0);
     });
     if (g) {
-      g.labels.add(c.label);
+      for (const l of c.labels) g.labels.add(l);
       g.x0 = Math.min(g.x0, c.x0);
       g.x1 = Math.max(g.x1, c.x1);
-    } else groups.push({ labels: new Set([c.label]), x0: c.x0, x1: c.x1 });
+    } else groups.push({ labels: new Set(c.labels), x0: c.x0, x1: c.x1 });
   }
 
   // Re-join pieces of one character broken apart by anti-aliasing at small sizes.
@@ -799,9 +836,11 @@ function extractGlyphs(
     const wb = b.x1 - b.x0 + 1;
     const ha = glyphHeight(a);
     const hb = glyphHeight(b);
+    const hRatio = Math.min(ha, hb) / Math.max(ha, hb);
+    // A real "1" is as tall as its neighbour; a broken-off edge of "0" is shorter.
     const halves =
       unionW <= 0.235 * R &&
-      (Math.min(wa, wb) < 0.06 * R || (Math.min(wa, wb) < 0.09 * R && Math.min(ha, hb) / Math.max(ha, hb) > 0.8));
+      ((Math.min(wa, wb) < 0.06 * R && hRatio < 0.85) || (Math.max(wa, wb) < 0.1 * R && hRatio > 0.8));
     if (gap <= 0.05 * R && (halves || ((tall(a) || tall(b)) && unionW <= 0.36 * R))) {
       for (const l of b.labels) a.labels.add(l);
       a.x0 = Math.min(a.x0, b.x0);
@@ -814,7 +853,9 @@ function extractGlyphs(
   // (two digits or "<4" touching at low resolution).
   const glyphs: Glyph[] = [];
   for (const g of groups) {
-    if (g.labels.size === 1 && g.x1 - g.x0 + 1 > 0.27 * R) {
+    // Too wide in absolute terms, or for its own height (small-font labels such as ">14").
+    const gw = g.x1 - g.x0 + 1;
+    if (g.labels.size === 1 && (gw > 0.27 * R || gw > 1.15 * glyphHeight(g))) {
       const cols: number[] = [];
       for (let x = g.x0; x <= g.x1; x++) {
         let n = 0;
@@ -857,4 +898,19 @@ function extractGlyphs(
       box: { x0: x0 + gx0 / s, y0: y0 + gy0 / s, x1: x0 + (gx1 + 1) / s, y1: y0 + (gy1 + 1) / s },
     };
   });
+}
+
+/** Typical digit height as a fraction of the cell pitch. */
+const DIGIT_REL_H = 0.24;
+
+/**
+ * Three-character labels (">14") are set in a smaller font. Scale their glyph sizes back to
+ * the normal digit height so small digits are not mistaken for the shorter "<" / ">" signs.
+ */
+export function normalizeLabelSize(glyphs: GlyphFeatures[]): GlyphFeatures[] {
+  if (glyphs.length < 3) return glyphs;
+  const tallest = Math.max(...glyphs.map((g) => g.relH));
+  if (tallest <= 0 || tallest >= DIGIT_REL_H * 0.92) return glyphs;
+  const k = DIGIT_REL_H / tallest;
+  return glyphs.map((g) => ({ ...g, relW: g.relW * k, relH: g.relH * k }));
 }
