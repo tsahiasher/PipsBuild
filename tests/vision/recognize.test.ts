@@ -1,12 +1,14 @@
+import { existsSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { browserDecoded, loadImage, scaleImage } from '../../scripts/load';
+import { GOLDENS_DIR, browserDecoded, goldenPath, listSamples, loadImage, samplePath, scaleImage } from '../../scripts/load';
 import { recognize } from '../../src/vision/recognize';
-import { constraintLabel } from '../../src/engine/constraints';
 import { checkConsistency } from '../../src/engine/puzzle';
 import { boardComponents } from '../../src/engine/geometry';
 import type { RGBAImage } from '../../src/vision/image';
 import type { Puzzle } from '../../src/engine/types';
-import { TRUTH, parseTruth, truthFor, type Truth } from './groundTruth';
+import { canonicalPuzzle, goldenFor } from './goldens';
+
+const samples = listSamples();
 
 function crop(img: RGBAImage, x0: number, y0: number, w: number, h: number): RGBAImage {
   const data = new Uint8ClampedArray(w * h * 4);
@@ -15,65 +17,75 @@ function crop(img: RGBAImage, x0: number, y0: number, w: number, h: number): RGB
   return { width: w, height: h, data };
 }
 
-/** Compares a reconstruction with the ground truth, independent of region ids and grid offset. */
-function expectMatches(p: Puzzle, t: Truth) {
-  const { regions, playable } = parseTruth(t);
-  const minR = Math.min(...p.cells.map((c) => c.row));
-  const minC = Math.min(...p.cells.map((c) => c.col));
-  const norm = (id: string) => {
-    const [r, c] = id.split(',').map(Number);
-    return `${r - minR},${c - minC}`;
-  };
-  expect(p.cells.map((c) => norm(c.id)).sort()).toEqual([...playable].sort());
-
-  const got = p.regions
-    .map((r) => `${r.cells.map(norm).sort().join(' ')} => ${constraintLabel(r.constraint)}`)
-    .sort();
-  const want = [...regions.entries()].map(([k, cells]) => `${[...cells].sort().join(' ')} => ${t.labels[k]}`).sort();
-  expect(got).toEqual(want);
-
-  expect(p.dominoes.map((d) => `${d.a}${d.b}`).join(' ')).toBe(t.dominoes);
+/** The reconstruction must equal the sample's golden (see goldens.ts for what is compared). */
+function expectMatchesGolden(p: Puzzle, name: string) {
+  expect(canonicalPuzzle(p)).toEqual(canonicalPuzzle(goldenFor(name).puzzle));
   expect(checkConsistency(p).filter((i) => i.level === 'error')).toEqual([]);
 }
 
-describe('screenshot reconstruction', () => {
-  // Each screenshot is checked twice: decoded by jpeg-js in Node, and with the exact pixels
-  // Chrome produces (its JPEG decoder differs slightly, which once flipped a cell).
-  for (const t of TRUTH) {
-    for (const decoder of ['node', 'chrome'] as const) {
-      it(`reconstructs ${t.file} exactly (${decoder} decode)`, async () => {
-        const img = loadImage(decoder === 'node' ? t.file : browserDecoded(t.file));
-        const res = await recognize(img);
-        expectMatches(res.puzzle, t);
-        expect(res.warnings).toEqual([]);
-      });
-    }
-  }
+describe('samples and goldens', () => {
+  it('finds the sample screenshots', () => {
+    expect(samples.length).toBeGreaterThan(0);
+  });
 
+  it('every sample has a golden, and every golden has a sample', () => {
+    expect(
+      samples.filter((n) => !existsSync(goldenPath(n))),
+      'samples without a golden (run: npm run save:goldens)',
+    ).toEqual([]);
+    const goldenNames = readdirSync(GOLDENS_DIR)
+      .filter((f) => f.endsWith('.json'))
+      .map((f) => f.replace(/\.json$/, ''));
+    expect(
+      goldenNames.filter((n) => !samples.includes(n)),
+      'goldens without a sample image',
+    ).toEqual([]);
+  });
+});
+
+describe('screenshot reconstruction matches the goldens', () => {
+  // Each sample is checked twice: decoded by jpeg-js in Node, and with the exact pixels Chrome
+  // produces (its JPEG decoder differs slightly, which once flipped a cell). The Chrome-decoded
+  // dump is optional; `npm run check:chrome` runs the real browser pipeline regardless.
+  for (const name of samples) {
+    it(`${name} (node decode)`, async () => {
+      const res = await recognize(loadImage(samplePath(name)));
+      expectMatchesGolden(res.puzzle, name);
+      expect(res.warnings).toEqual([]);
+    });
+
+    it.skipIf(!existsSync(browserDecoded(name)))(`${name} (chrome decode)`, async () => {
+      const res = await recognize(loadImage(browserDecoded(name)));
+      expectMatchesGolden(res.puzzle, name);
+      expect(res.warnings).toEqual([]);
+    });
+  }
+});
+
+describe('recognition is robust to how the screenshot was taken', () => {
   it('finds the two disconnected board pieces in game1', async () => {
-    const res = await recognize(loadImage('game1.jpg'));
+    const res = await recognize(loadImage(samplePath('game1')));
     expect(boardComponents(res.puzzle.cells)).toHaveLength(2);
   });
 
   it('does not depend on screenshot resolution (65% and 140%)', async () => {
-    const t = truthFor('game1.jpg');
-    const img = loadImage(t.file);
-    expectMatches((await recognize(scaleImage(img, 0.65))).puzzle, t);
-    expectMatches((await recognize(scaleImage(img, 1.4))).puzzle, t);
+    const img = loadImage(samplePath('game1'));
+    expectMatchesGolden((await recognize(scaleImage(img, 0.65))).puzzle, 'game1');
+    expectMatchesGolden((await recognize(scaleImage(img, 1.4))).puzzle, 'game1');
   });
 
   it('works on a crop without browser chrome (desktop-style capture)', async () => {
-    for (const t of [truthFor('game2.jpg'), truthFor('game6.jpg')]) {
-      const img = loadImage(t.file);
+    for (const name of ['game2', 'game6']) {
+      const img = loadImage(samplePath(name));
       const top = Math.round(img.height * 0.2);
       const res = await recognize(crop(img, 0, top, img.width, Math.round(img.height * 0.75)));
-      expectMatches(res.puzzle, t);
+      expectMatchesGolden(res.puzzle, name);
     }
   });
 
   it('reports progress through every stage', async () => {
     const stages: string[] = [];
-    await recognize(loadImage('game3.jpg'), { onProgress: (s) => void stages.push(s) });
+    await recognize(loadImage(samplePath('game3')), { onProgress: (s) => void stages.push(s) });
     for (const s of ['Analyzing image…', 'Detecting board…', 'Finding regions…', 'Detecting dominoes…', 'Recognizing conditions…', 'Building puzzle…'])
       expect(stages).toContain(s);
   });

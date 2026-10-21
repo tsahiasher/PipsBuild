@@ -4,15 +4,20 @@ import { anchorOf, cellId, parseCellId, rotationOf } from '../engine/geometry';
 import { canPlaceDomino, placementFor, rotatePlacement } from '../engine/placement';
 import { describeConstraint } from '../engine/constraints';
 import type { CellId, Placement, Puzzle, Rotation } from '../engine/types';
-import type { Settings } from '../state/storage';
+import type { BestTime, Settings } from '../state/storage';
 import { Board, boardToClient, boardViewBox, clientToBoard } from './Board';
-import { DominoShape, dominoAriaLabel, dominoTransform, type DominoLook } from './Domino';
+import { DominoShape, dominoAriaLabel, dominoTransform } from './Domino';
+import { Confetti } from './Confetti';
+import { SelectedDomino } from './SelectedDomino';
+import { placementCenter } from './boardGeometry';
 import { Dialog } from './Dialog';
 import { U } from './theme';
 
 const SELECT_TIMEOUT_MS = 2000;
 const DRAG_THRESHOLD_PX = 6;
 const RETURN_MS = 220;
+/** Duration of the quarter-turn animation; keep in step with `.board-domino.is-selected` in styles.css. */
+const TURN_MS = 180;
 
 type Source = 'tray' | 'board';
 
@@ -56,6 +61,10 @@ interface Selection {
   pivot: CellId;
   /** Placement when the selection began; an illegal drag-and-drop returns the domino here. */
   original: Placement;
+  /** Quarter turns clockwise since the selection began (drawn as an animated turn around the pivot). */
+  turns: number;
+  /** `turns` at the last legal pose, which is where an illegal turn snaps back to. */
+  legalTurns: number;
 }
 
 interface KeyboardMove {
@@ -73,15 +82,11 @@ interface Props {
   onBack: () => void;
   onPlayAgain: () => void;
   onImportAnother: () => void;
+  /** Fastest solve of this puzzle so far (including the one just finished). */
+  best?: BestTime;
 }
 
-const center = (p: Placement) => {
-  const a = parseCellId(p.cellA);
-  const b = parseCellId(p.cellB);
-  return { x: ((a.col + b.col) / 2 + 0.5) * U, y: ((a.row + b.row) / 2 + 0.5) * U };
-};
-
-export function PlayScreen({ puzzle, game, dispatch, settings, onSettings, onBack, onPlayAgain, onImportAnother }: Props) {
+export function PlayScreen({ puzzle, game, dispatch, settings, onSettings, onBack, onPlayAgain, onImportAnother, best }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const trayRef = useRef<HTMLDivElement>(null);
@@ -160,8 +165,18 @@ export function PlayScreen({ puzzle, game, dispatch, settings, onSettings, onBac
     // After 2 s without taps the selection ends; an illegal tentative position reverts
     // to the last legal placement (which is what the game state still holds).
     selTimer.current = window.setTimeout(() => {
-      selTimer.current = null;
-      setSelection(null);
+      const sel = selectionRef.current;
+      if (sel && !sel.legal) {
+        // Turn it back to the last legal pose (what the game still holds), then let go.
+        setSelection({ ...sel, turns: sel.legalTurns, tentative: gameRef.current.placements[sel.id] ?? sel.original, legal: true });
+        selTimer.current = window.setTimeout(() => {
+          selTimer.current = null;
+          setSelection(null);
+        }, TURN_MS + 40);
+      } else {
+        selTimer.current = null;
+        setSelection(null);
+      }
     }, SELECT_TIMEOUT_MS);
   }, [setSelection]);
 
@@ -246,7 +261,7 @@ export function PlayScreen({ puzzle, game, dispatch, settings, onSettings, onBac
       const current = selectionRef.current;
       const fresh = !current || current.id !== id;
       const sel: Selection = fresh
-        ? { id, tentative: placed, legal: true, pivot: anchorOf(placed.cellA, placed.cellB), original: placed }
+        ? { id, tentative: placed, legal: true, pivot: anchorOf(placed.cellA, placed.cellB), original: placed, turns: 0, legalTurns: 0 }
         : current;
       let next: Selection;
       if (fresh && !rotateNow) {
@@ -257,7 +272,8 @@ export function PlayScreen({ puzzle, game, dispatch, settings, onSettings, onBac
         const legal = canPlace(id, tentative);
         if (legal) dispatch({ type: 'place', dominoId: id, cellA: tentative.cellA, cellB: tentative.cellB, now: Date.now() });
         setAnnounce(legal ? 'Rotated.' : 'Rotated into an illegal position; it will snap back unless rotated again.');
-        next = { ...sel, tentative, legal };
+        const turns = sel.turns + 1;
+        next = { ...sel, tentative, legal, turns, legalTurns: legal ? turns : sel.legalTurns };
       }
       setSelection(next);
       armSelectionTimer();
@@ -313,7 +329,7 @@ export function PlayScreen({ puzzle, game, dispatch, settings, onSettings, onBac
         rot = rotationOf(o.cellA, o.cellB) ?? 0;
       }
       if (d.source === 'board' && placed && svgRef.current) {
-        const c = center(placed);
+        const c = placementCenter(placed);
         target = boardToClient(svgRef.current, vb, c.x, c.y);
       } else {
         const slot = slotRefs.current.get(d.id)?.getBoundingClientRect();
@@ -453,7 +469,7 @@ export function PlayScreen({ puzzle, game, dispatch, settings, onSettings, onBac
     .filter((d) => game.placements[d.id] && selection?.id !== d.id)
     .map((d) => {
       const p = game.placements[d.id];
-      const c = center(p);
+      const c = placementCenter(p);
       const rot = rotationOf(p.cellA, p.cellB) ?? 0;
       const hidden = drag?.id === d.id || kbd?.id === d.id;
       return (
@@ -476,7 +492,7 @@ export function PlayScreen({ puzzle, game, dispatch, settings, onSettings, onBac
   const previewOf = (id: string, pv: Preview | null) => {
     if (!pv) return null;
     const d = dominoById.get(id)!;
-    const c = center(pv.placement);
+    const c = placementCenter(pv.placement);
     const rot = rotationOf(pv.placement.cellA, pv.placement.cellB) ?? 0;
     return (
       <g transform={dominoTransform(c.x, c.y, rot)} pointerEvents="none">
@@ -490,28 +506,27 @@ export function PlayScreen({ puzzle, game, dispatch, settings, onSettings, onBac
   let selected = null;
   if (selection) {
     const d = dominoById.get(selection.id)!;
-    const c = center(selection.tentative);
     const rot = rotationOf(selection.tentative.cellA, selection.tentative.cellB) ?? 0;
-    const look: DominoLook = selection.legal ? 'selected' : 'invalid';
     selected = (
-      <g
-        className="board-domino is-selected"
-        transform={dominoTransform(c.x, c.y, rot)}
-        tabIndex={0}
-        role="button"
-        aria-pressed
-        aria-label={dominoAriaLabel(d.a, d.b, rot) + (selection.legal ? ', selected' : ', selected, illegal position')}
+      <SelectedDomino
+        key={selection.id}
+        a={d.a}
+        b={d.b}
+        original={selection.original}
+        pivot={selection.pivot}
+        turns={selection.turns}
+        legal={selection.legal}
+        label={dominoAriaLabel(d.a, d.b, rot) + (selection.legal ? ', selected' : ', selected, illegal position')}
         onPointerDown={(e) => onPiecePointerDown(e, d.id, 'board')}
         onKeyDown={(e) => onPieceKey(e, d.id, 'board')}
-      >
-        <DominoShape a={d.a} b={d.b} look={look} translucent />
-        {!selection.legal && <rect x={2} y={2} width={196} height={94} rx={19} fill="none" stroke="#000" strokeWidth={6} />}
-      </g>
+      />
     );
   }
 
   const violated = puzzle.regions.filter((r) => errors.has(r.id));
   const placedCount = Object.keys(game.placements).length;
+  const solvedTime = timerElapsed(game.timer, Date.now());
+  const newBest = !!best && best.solves > 1 && solvedTime <= best.ms;
 
   return (
     <div ref={rootRef} className={`screen play ${drag ? 'dragging' : ''}`}>
@@ -661,31 +676,41 @@ export function PlayScreen({ puzzle, game, dispatch, settings, onSettings, onBac
       )}
 
       {game.solved && !doneDismissed && (
-        <Dialog
-          title="Puzzle solved!"
-          onClose={() => setDoneDismissed(true)}
-          actions={
-            <>
-              <button className="btn" onClick={onImportAnother}>
-                Import another puzzle
-              </button>
-              <button className="btn primary" onClick={onPlayAgain}>
-                Play again
-              </button>
-            </>
-          }
-        >
-          <div className="result">
-            <div>
-              <div className="muted small">Time</div>
-              <div className="result-time">{formatTime(timerElapsed(game.timer, Date.now()))}</div>
+        <>
+          <Confetti />
+          <Dialog
+            title="Puzzle solved!"
+            onClose={() => setDoneDismissed(true)}
+            actions={
+              <>
+                <button className="btn" onClick={onImportAnother}>
+                  Import another puzzle
+                </button>
+                <button className="btn primary" onClick={onPlayAgain}>
+                  Play again
+                </button>
+              </>
+            }
+          >
+            <div className="result">
+              <div>
+                <div className="muted small">Time</div>
+                <div className="result-time">{formatTime(solvedTime)}</div>
+              </div>
+              <div>
+                <div className="muted small">Moves</div>
+                <div className="result-moves">{game.moves}</div>
+              </div>
+              {best && (
+                <div>
+                  <div className="muted small">Best</div>
+                  <div className="result-moves">{formatTime(best.ms)}</div>
+                </div>
+              )}
             </div>
-            <div>
-              <div className="muted small">Moves</div>
-              <div className="result-moves">{game.moves}</div>
-            </div>
-          </div>
-        </Dialog>
+            {newBest && <p className="new-best">New best time!</p>}
+          </Dialog>
+        </>
       )}
     </div>
   );

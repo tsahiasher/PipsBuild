@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import type { ImportProgress } from '../App';
 import { DominoShape } from './Domino';
 
+/** ?debug=1 shows buttons that load the sample screenshots (served from samples/, see vite.config.ts). */
+const DEBUG = new URLSearchParams(window.location.search).get('debug') === '1';
+const sampleUrl = (path: string) => new URL(`samples/${path}`, document.baseURI).href;
+
 const STAGES = [
   'Analyzing image…',
   'Detecting dominoes…',
@@ -31,6 +35,27 @@ export function HomeScreen({ progress, error, canResume, resumeSolved, canEdit, 
   const [manual, setManual] = useState(false);
   const [rows, setRows] = useState(6);
   const [cols, setCols] = useState(6);
+  const [samples, setSamples] = useState<string[]>([]);
+  const [debugError, setDebugError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!DEBUG) return;
+    fetch(sampleUrl('index.json'))
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((names: string[]) => setSamples(names))
+      .catch(() => setDebugError('Could not list the samples.'));
+  }, []);
+
+  const loadSample = async (name: string) => {
+    setDebugError(null);
+    try {
+      const res = await fetch(sampleUrl(`${name}.jpg`));
+      if (!res.ok) throw new Error(`${res.status}`);
+      onFile(await res.blob());
+    } catch (e) {
+      setDebugError(`Could not load ${name}: ${e instanceof Error ? e.message : e}`);
+    }
+  };
 
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
@@ -199,6 +224,24 @@ export function HomeScreen({ progress, error, canResume, resumeSolved, canEdit, 
         )}
       </section>
 
+      {DEBUG && (
+        <section className="card debug-card" aria-label="Debug: sample screenshots">
+          <h2 className="h3">Debug: load a sample</h2>
+          <div className="row gap-sm wrap">
+            {samples.map((name) => (
+              <button key={name} className="btn small" onClick={() => loadSample(name)}>
+                {name}
+              </button>
+            ))}
+            {samples.length === 0 && !debugError && <span className="muted small">No samples found in samples/.</span>}
+          </div>
+          {debugError && (
+            <p className="alert error small" role="alert">
+              {debugError}
+            </p>
+          )}
+        </section>
+      )}
     </main>
   );
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { gameReducer, newGame, pauseTimer, type GameAction } from './engine/game';
+import { gameReducer, newGame, pauseTimer, timerElapsed, type GameAction } from './engine/game';
 import { makeCells, normalizePuzzle } from './engine/puzzle';
 import { parsePuzzleFile } from './engine/puzzleFile';
 import { cellId } from './engine/geometry';
@@ -102,7 +102,14 @@ export function App() {
       if (next === game) return s;
       // Re-insert so the most recently played game is last (used for pruning).
       const { [s.active.id]: _old, ...rest } = s.games;
-      return { ...s, games: { ...rest, [s.active.id]: next } };
+      let bests = s.bests;
+      if (next.solved && !game.solved) {
+        // Just solved: the timer has stopped, so its elapsed time is the solving time.
+        const ms = timerElapsed(next.timer, Date.now());
+        const before = s.bests[s.active.id];
+        bests = { ...s.bests, [s.active.id]: { ms: before ? Math.min(before.ms, ms) : ms, solves: (before?.solves ?? 0) + 1 } };
+      }
+      return { ...s, bests, games: { ...rest, [s.active.id]: next } };
     });
   }, []);
 
@@ -131,6 +138,7 @@ export function App() {
         game={game}
         dispatch={dispatchGame}
         settings={state.settings}
+        best={state.bests[state.active.id]}
         onSettings={(settings) => setState((s) => ({ ...s, settings }))}
         onBack={() => setState((s) => ({ ...s, screen: s.draft ? 'editor' : 'home' }))}
         onPlayAgain={playAgain}

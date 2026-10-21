@@ -10,6 +10,9 @@
   --danger: #c7262e;
   --warn: #9a5b00;
   --ok: #2c7a4b;
+  --ok-ink: #1d6a3d;
+  --danger-ink: #b3202a;
+  --warn-ink: #8a5200;
   --radius: 16px;
   --shadow: 0 1px 2px rgba(40, 30, 20, 0.06), 0 6px 20px rgba(40, 30, 20, 0.06);
   color-scheme: light;
@@ -23,6 +26,9 @@
     --muted: #a59e93;
     --line: #3a3732;
     --accent: #5fb39a;
+    --ok-ink: #8fdcae;
+    --danger-ink: #ff9aa0;
+    --warn-ink: #f1c27a;
     --accent-ink: #10201b;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.25);
     color-scheme: dark;
@@ -303,8 +309,11 @@ kbd {
 .manual-card p {
   margin: 0;
 }
-.home-foot {
-  text-align: center;
+.debug-card {
+  border-style: dashed;
+}
+.debug-card .h3 {
+  margin-bottom: 10px;
 }
 
 .progress-card {
@@ -402,6 +411,7 @@ kbd {
   margin: 8px 0 0;
 }
 
+
 /* ---------- play ---------- */
 .play {
   height: 100%;
@@ -440,6 +450,10 @@ kbd {
   cursor: grab;
   touch-action: none;
   outline: none;
+}
+.board-domino.is-selected {
+  /* Quarter turns around the pivot square animate (see SelectedDomino.tsx; TURN_MS in PlayScreen.tsx). */
+  transition: transform 180ms cubic-bezier(0.3, 0.7, 0.4, 1);
 }
 .board-domino:focus-visible > g > rect:nth-of-type(2) {
   stroke: #1b7cff;
@@ -517,12 +531,45 @@ kbd {
     scale: 1;
   }
 }
+
+/* Confetti for a solved puzzle. */
+.confetti {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  pointer-events: none;
+  overflow: hidden;
+}
+.confetti span {
+  position: absolute;
+  top: -16px;
+  opacity: 0;
+  border-radius: 2px;
+  animation-name: confetti-fall;
+  animation-timing-function: cubic-bezier(0.3, 0.2, 0.6, 1);
+  animation-fill-mode: forwards;
+}
+@keyframes confetti-fall {
+  0% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(var(--drift), 108vh, 0) rotate(720deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .error-dot,
   .tray-domino,
+  .board-domino.is-selected,
   .drag-ghost {
     animation: none !important;
     transition: none !important;
+  }
+  .confetti {
+    display: none;
   }
 }
 
@@ -609,6 +656,64 @@ kbd {
   flex-direction: column;
   min-height: 100dvh;
 }
+.editor-head {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--surface);
+}
+/* Solvability strip under the top bar: green = solvable, red = not solvable. */
+.solve-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.95rem;
+  line-height: 1.3;
+  transition: opacity 120ms ease;
+}
+.solve-banner.pending {
+  opacity: 0.6;
+}
+.solve-banner.ok {
+  --tone: var(--ok);
+  background: color-mix(in srgb, var(--ok) 15%, var(--surface));
+  color: var(--ok-ink);
+}
+.solve-banner.bad {
+  --tone: var(--danger);
+  background: color-mix(in srgb, var(--danger) 13%, var(--surface));
+  color: var(--danger-ink);
+}
+.solve-banner.warn {
+  --tone: #c77700;
+  background: color-mix(in srgb, #e08a00 16%, var(--surface));
+  color: var(--warn-ink);
+}
+.solve-banner.busy {
+  --tone: var(--muted);
+  background: var(--bg);
+  color: var(--muted);
+}
+.solve-icon {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #fff;
+  background: var(--tone, var(--muted));
+}
+.solve-text {
+  min-width: 0;
+}
+.solve-detail {
+  font-weight: 500;
+}
 .editor-body {
   display: grid;
   gap: 12px;
@@ -622,7 +727,7 @@ kbd {
   }
   .editor-canvas {
     position: sticky;
-    top: 12px;
+    top: 108px; /* below the sticky top bar + solvability strip */
   }
 }
 .editor-canvas {
@@ -814,4 +919,10 @@ kbd {
   width: 100%;
   max-width: 100px;
   overflow: visible;
+}
+
+.new-best {
+  margin: 14px 0 0;
+  font-weight: 800;
+  color: var(--ok-ink);
 }

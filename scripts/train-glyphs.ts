@@ -1,15 +1,17 @@
 /**
- * Builds src/vision/glyphTemplates.ts from the reference screenshots and their ground truth.
+ * Builds src/vision/glyphTemplates.ts from the sample screenshots, labelled by their goldens.
+ * Review a new golden (see CLAUDE.md) before training: a misread golden would teach the
+ * classifier the same mistake.
  * Each screenshot is used as decoded by Node and by Chrome, plus downscaled copies that
  * simulate small desktop captures. Run: npm run train:glyphs
  */
 import { existsSync, writeFileSync } from 'node:fs';
-import { browserDecoded, loadImage, scaleImage } from './load';
+import { browserDecoded, loadImage, samplePath, scaleImage } from './load';
 import { normalizeLabelSize, recognize } from '../src/vision/recognize';
 import { badgeCell } from '../src/engine/puzzle';
 import { classifyGlyph, type GlyphFeatures, type GlyphTemplate } from '../src/vision/glyphs';
 import type { RGBAImage } from '../src/vision/image';
-import { TRUTH, parseTruth, type Truth } from '../tests/vision/groundTruth';
+import { goldens, parseGolden, type Golden } from '../tests/vision/goldens';
 
 interface Sample {
   puzzle: string;
@@ -20,20 +22,20 @@ interface Sample {
 }
 
 /** Screenshots of the same puzzle share a key so leave-one-out never trains on the same badges. */
-const puzzleKey = (t: Truth) => t.key;
+const puzzleKey = (t: Golden) => t.key;
 
 const samples: Sample[] = [];
 let mismatches = 0;
-for (const t of TRUTH) {
-  const name = t.file.replace(/\.jpg$/, '');
-  const variants: [string, RGBAImage][] = [['node', loadImage(t.file)]];
+for (const t of goldens()) {
+  const name = t.name;
+  const variants: [string, RGBAImage][] = [['node', loadImage(samplePath(name))]];
   if (existsSync(browserDecoded(name))) {
     const b = loadImage(browserDecoded(name));
     variants.push(['chrome', b]);
     // Simulated small captures, unless the screenshot is already small.
     if (b.width > 700) variants.push(['x0.6', scaleImage(b, 0.6)], ['x0.45', scaleImage(b, 0.45)]);
   }
-  const { regions } = parseTruth(t);
+  const { regions } = parseGolden(t);
   for (const [variant, img] of variants) {
     const res = await recognize(img, { skipClassification: true });
     for (const b of res.badges) {

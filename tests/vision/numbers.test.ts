@@ -5,12 +5,12 @@
  * screenshots, and runs the full recogniser at phone and desktop scale.
  */
 import { describe, expect, it } from 'vitest';
-import { browserDecoded, loadImage, scaleImage } from '../../scripts/load';
+import { loadImage, samplePath, scaleImage } from '../../scripts/load';
 import { recognize, type DetectedBadge } from '../../src/vision/recognize';
 import { badgeCell } from '../../src/engine/puzzle';
 import { constraintLabel } from '../../src/engine/constraints';
 import { rgbToLab, type RGBAImage } from '../../src/vision/image';
-import { parseTruth, truthFor, type Truth } from './groundTruth';
+import { goldenFor, parseGolden, type Golden } from './goldens';
 
 interface GlyphSource {
   img: RGBAImage;
@@ -24,10 +24,10 @@ const whiteness = (img: RGBAImage, x: number, y: number) => {
   return L - 2 * Math.hypot(a, b);
 };
 
-/** Recognised badges paired with their ground-truth label. */
-async function labelledBadges(t: Truth, img: RGBAImage) {
+/** Recognised badges paired with the label the golden gives their region. */
+async function labelledBadges(t: Golden, img: RGBAImage) {
   const res = await recognize(img, { skipClassification: true });
-  const { regions } = parseTruth(t);
+  const { regions } = parseGolden(t);
   const out: { badge: DetectedBadge; label: string }[] = [];
   for (const b of res.badges) {
     const cell = `${b.corner.row - 1},${b.corner.col - 1}`;
@@ -40,8 +40,8 @@ async function labelledBadges(t: Truth, img: RGBAImage) {
 async function glyphSources(): Promise<Map<string, GlyphSource>> {
   const sources = new Map<string, GlyphSource>();
   for (const name of ['game4', 'game6', 'game1', 'game2', 'game3', 'game7']) {
-    const t = truthFor(`${name}.jpg`);
-    const img = loadImage(browserDecoded(name));
+    const t = goldenFor(name);
+    const img = loadImage(samplePath(name));
     const { res, out } = await labelledBadges(t, img);
     for (const { badge, label } of out) {
       const chars = [...label];
@@ -135,14 +135,14 @@ const LABELS = [
 describe('condition values 0–24', () => {
   it('reads every sum from 0 to 24 and every operator, at phone and desktop scale', async () => {
     const sources = await glyphSources();
-    const base = truthFor('game4.jpg');
-    const img = loadImage(browserDecoded('game4'));
+    const base = goldenFor('game4');
+    const img = loadImage(samplePath('game4'));
     const { res, out } = await labelledBadges(base, img);
     expect(out.length).toBe(LABELS.length);
 
     // Assign a new label to every badge and repaint it.
-    const { regions } = parseTruth(base);
-    const truth: Truth = { ...base, labels: { ...base.labels } };
+    const { regions } = parseGolden(base);
+    const truth: Golden = { ...base, labels: { ...base.labels } };
     out.forEach(({ badge }, i) => {
       const cell = `${badge.corner.row - 1},${badge.corner.col - 1}`;
       const key = [...regions.entries()].find(([, cells]) => badgeCell({ id: '', color: 0, cells, constraint: null }) === cell)![0];

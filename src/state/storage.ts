@@ -8,6 +8,12 @@ export interface Settings {
   showValidationWhilePlaying: boolean;
 }
 
+/** Fastest solve of a puzzle and how many times it has been solved. */
+export interface BestTime {
+  ms: number;
+  solves: number;
+}
+
 export interface StoredState {
   /** Puzzle being verified / edited. */
   draft: Puzzle | null;
@@ -17,6 +23,8 @@ export interface StoredState {
   /** Games keyed by puzzle id, so leaving and re-entering a puzzle keeps its timer. */
   games: Record<string, GameState>;
   settings: Settings;
+  /** Best times keyed by puzzle id. */
+  bests: Record<string, BestTime>;
   screen: 'home' | 'editor' | 'play';
   savedAt: number;
 }
@@ -31,6 +39,7 @@ export const defaultState = (): StoredState => ({
   active: null,
   games: {},
   settings: { showValidationWhilePlaying: false },
+  bests: {},
   screen: 'home',
   savedAt: Date.now(),
 });
@@ -39,7 +48,9 @@ export function loadState(): StoredState {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return defaultState();
-    const s = { ...defaultState(), ...(JSON.parse(raw) as StoredState) };
+    const saved = JSON.parse(raw) as Partial<StoredState>;
+    // Best times were added later: older saves start with none.
+    const s: StoredState = { ...defaultState(), ...saved, bests: saved.bests ?? {} };
     // After a reload, offer "Resume puzzle" / "New puzzle" instead of jumping into play.
     if (s.screen === 'play') s.screen = 'home';
     // Time while the browser was closed is not counted: freeze running timers at the last save.

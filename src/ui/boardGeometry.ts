@@ -1,5 +1,5 @@
 import { parseCellId } from '../engine/geometry';
-import type { CellId } from '../engine/types';
+import type { CellId, Placement } from '../engine/types';
 import { U } from './theme';
 
 type Pt = [number, number];
@@ -103,4 +103,17 @@ export function cellBounds(cells: { row: number; col: number }[]): Bounds {
     maxRow: Math.max(...cells.map((c) => c.row)),
     maxCol: Math.max(...cells.map((c) => c.col)),
   };
+}
+
+/** Board-unit centre of the two squares a domino covers. */
+export function placementCenter(p: Placement): { x: number; y: number } {
+  const a = parseCellId(p.cellA);
+  const b = parseCellId(p.cellB);
+  return { x: ((a.col + b.col) / 2 + 0.5) * U, y: ((a.row + b.row) / 2 + 0.5) * U };
+}
+
+/** Board-unit centre of one square. */
+export function cellCenter(id: CellId): { x: number; y: number } {
+  const { row, col } = parseCellId(id);
+  return { x: (col + 0.5) * U, y: (row + 0.5) * U };
 }

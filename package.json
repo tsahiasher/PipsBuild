@@ -11,6 +11,8 @@
     "test:engine": "vitest run tests/engine",
     "test:vision": "vitest run tests/vision",
     "analyze": "vite-node scripts/analyze.ts",
+    "save:goldens": "vite-node scripts/save-goldens.ts",
+    "count:solutions": "vite-node scripts/count-solutions.ts",
     "train:glyphs": "vite-node scripts/train-glyphs.ts",
     "check:chrome": "node scripts/check-chrome.mjs"
   },

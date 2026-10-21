@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import jpeg from 'jpeg-js';
 import { PNG } from 'pngjs';
 import type { RGBAImage } from '../src/vision/image';
@@ -14,8 +14,21 @@ export function loadImage(path: string): RGBAImage {
   return { width: raw.width, height: raw.height, data: raw.data };
 }
 
-/** @deprecated use loadImage */
-export const loadJpeg = loadImage;
+export const SAMPLES_DIR = 'samples';
+export const GOLDENS_DIR = 'samples/goldens';
+export const samplePath = (name: string) => `${SAMPLES_DIR}/${name}.jpg`;
+export const goldenPath = (name: string) => `${GOLDENS_DIR}/${name}.json`;
+
+const sampleNumber = (name: string) => Number(/\d+/.exec(name)?.[0] ?? 0);
+
+/** Names of all sample screenshots ("game1", "game2", ...) in samples/, numerically sorted. */
+export function listSamples(): string[] {
+  if (!existsSync(SAMPLES_DIR)) return [];
+  return readdirSync(SAMPLES_DIR)
+    .filter((f) => /^game\d+\.jpg$/i.test(f))
+    .map((f) => f.replace(/\.jpg$/i, ''))
+    .sort((a, b) => sampleNumber(a) - sampleNumber(b));
+}
 
 /** Path of a screenshot as decoded by Chrome (exact pixels the app sees in the browser). */
 export const browserDecoded = (name: string) => `tests/vision/browser-decoded/${name.replace(/\.jpg$/, '')}.png`;

@@ -8,6 +8,8 @@ import type { CellId, Constraint, ConstraintType, Domino, Puzzle, Region } from 
 import type { RecognitionMeta } from '../state/storage';
 import { Board, boardViewBox, clientToBoard } from './Board';
 import { DominoShape } from './Domino';
+import { SolveBanner } from './SolveBanner';
+import { useSolvability } from './useSolvability';
 import { REGION_COLORS, U, regionColor } from './theme';
 
 type Tool = 'cells' | 'paint' | 'erase' | 'select';
@@ -50,6 +52,7 @@ export function EditorScreen({ draft, recognition, image, onChange, onStart, onH
   const draftRef = useRef(draft);
   draftRef.current = draft;
 
+  const solvability = useSolvability(draft);
   const issues = useMemo(() => checkConsistency(draft), [draft]);
   const errors = issues.filter((i) => i.level === 'error');
   const components = useMemo(() => boardComponents(draft.cells).length, [draft.cells]);
@@ -203,15 +206,18 @@ export function EditorScreen({ draft, recognition, image, onChange, onStart, onH
 
   return (
     <div className="screen editor">
-      <header className="topbar">
-        <button className="btn ghost" onClick={onHome} aria-label="Back">
-          ← Back
-        </button>
-        <h1 className="h3 title">{recognition ? 'Check the puzzle' : 'Build the puzzle'}</h1>
-        <button className="btn primary" disabled={errors.length > 0} onClick={() => onStart(draft)}>
-          Start puzzle
-        </button>
-      </header>
+      <div className="editor-head">
+        <header className="topbar">
+          <button className="btn ghost" onClick={onHome} aria-label="Back">
+            ← Back
+          </button>
+          <h1 className="h3 title">{recognition ? 'Check the puzzle' : 'Build the puzzle'}</h1>
+          <button className="btn primary" disabled={errors.length > 0} onClick={() => onStart(draft)}>
+            Start puzzle
+          </button>
+        </header>
+        <SolveBanner state={solvability} />
+      </div>
 
       <div className="editor-body">
         <section className="editor-canvas card">

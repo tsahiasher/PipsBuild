@@ -1,15 +1,16 @@
-import { browserDecoded, loadImage } from './load';
+import { browserDecoded, listSamples, loadImage, samplePath } from './load';
 import { recognize } from '../src/vision/recognize';
 import { constraintLabel } from '../src/engine/constraints';
 import { cellId } from '../src/engine/geometry';
 
-const files = process.argv.slice(2).length ? process.argv.slice(2) : ['game1', 'game2', 'game3', 'game4', 'game6'];
+// Usage: npm run analyze [game1 game4 ...]   (no names = every sample)
+const files = process.argv.slice(2).length ? process.argv.slice(2) : listSamples();
 const skip = process.env.SKIP === '1';
 // BROWSER=1 analyses the Chrome-decoded pixel dumps instead of decoding the JPEG in Node.
 const browser = process.env.BROWSER === '1';
 for (const f of files) {
   const t0 = Date.now();
-  const res = await recognize(loadImage(browser ? browserDecoded(f) : `${f}.jpg`), { skipClassification: skip });
+  const res = await recognize(loadImage(browser ? browserDecoded(f) : samplePath(f)), { skipClassification: skip });
   const p = res.puzzle;
   const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   const regOf = new Map<string, number>();
