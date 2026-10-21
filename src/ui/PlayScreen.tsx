@@ -4,7 +4,7 @@ import { anchorOf, cellId, parseCellId, rotationOf } from '../engine/geometry';
 import { canPlaceDomino, placementFor, rotatePlacement } from '../engine/placement';
 import { describeConstraint } from '../engine/constraints';
 import type { CellId, Placement, Puzzle, Rotation } from '../engine/types';
-import type { BestTime, Settings } from '../state/storage';
+import type { BestTime } from '../state/storage';
 import { Board, boardToClient, boardViewBox, clientToBoard } from './Board';
 import { DominoShape, dominoAriaLabel, dominoTransform } from './Domino';
 import { Confetti } from './Confetti';
@@ -77,8 +77,6 @@ interface Props {
   puzzle: Puzzle;
   game: GameState;
   dispatch: (a: GameAction) => void;
-  settings: Settings;
-  onSettings: (s: Settings) => void;
   onBack: () => void;
   onPlayAgain: () => void;
   onImportAnother: () => void;
@@ -86,10 +84,38 @@ interface Props {
   best?: BestTime;
 }
 
-export function PlayScreen({ puzzle, game, dispatch, settings, onSettings, onBack, onPlayAgain, onImportAnother, best }: Props) {
+export function PlayScreen({ puzzle, game, dispatch, onBack, onPlayAgain, onImportAnother, best }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const trayRef = useRef<HTMLDivElement>(null);
+  const dominoCount = puzzle.dominoes.length;
+
+  // Side tray (landscape): pick the column count that makes the dominoes as large as possible while all of them fit.
+  useEffect(() => {
+    const tray = trayRef.current;
+    if (!tray) return;
+    const SLOT_RATIO = 1.5; // slot width / height; keep in sync with .slot in styles.css
+    const fit = () => {
+      const cs = getComputedStyle(tray);
+      const gap = parseFloat(cs.rowGap) || 0;
+      const w = tray.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      const h = tray.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+      let best = dominoCount;
+      for (let c = 1; c <= dominoCount; c++) {
+        const slotW = (w - (c - 1) * gap) / c;
+        const rows = Math.ceil(dominoCount / c);
+        if (slotW > 0 && rows * (slotW / SLOT_RATIO) + (rows - 1) * gap <= h) {
+          best = c;
+          break; // fewer columns = larger slots, so the first that fits is the biggest
+        }
+      }
+      tray.style.setProperty('--tray-cols', String(best));
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(tray);
+    return () => ro.disconnect();
+  }, [dominoCount]);
   const slotRefs = useRef(new Map<string, HTMLDivElement>());
   const pending = useRef<Pending | null>(null);
   const selTimer = useRef<number | null>(null);
@@ -106,14 +132,13 @@ export function PlayScreen({ puzzle, game, dispatch, settings, onSettings, onBac
   const [kbd, setKbd] = useState<KeyboardMove | null>(null);
   const [announce, setAnnounce] = useState('');
   const [confirmReset, setConfirmReset] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [doneDismissed, setDoneDismissed] = useState(false);
 
   const gameRef = useRef(game);
   gameRef.current = game;
   const vb = useMemo(() => boardViewBox(puzzle), [puzzle]);
   const dominoById = useMemo(() => new Map(puzzle.dominoes.map((d) => [d.id, d])), [puzzle]);
-  const errors = visibleErrors(puzzle, game, settings.showValidationWhilePlaying);
+  const errors = visibleErrors(puzzle, game);
 
   // ---------- timer ----------
   useEffect(() => {
@@ -547,32 +572,7 @@ export function PlayScreen({ puzzle, game, dispatch, settings, onSettings, onBac
           >
             Reset
           </button>
-          <button className="btn ghost icon-btn" aria-label="Settings" aria-expanded={showSettings} onClick={() => setShowSettings((v) => !v)}>
-            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden>
-              <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" strokeWidth="2" />
-              <path
-                d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              />
-            </svg>
-          </button>
         </div>
-        {showSettings && (
-          <div className="popover" role="dialog" aria-label="Settings">
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={settings.showValidationWhilePlaying}
-                onChange={(e) => onSettings({ ...settings, showValidationWhilePlaying: e.target.checked })}
-              />
-              Show validation while playing
-            </label>
-            <p className="muted small">Marks conditions that can no longer be met before the board is full.</p>
-            <p className="muted small">Moves: {game.moves}</p>
-          </div>
-        )}
       </header>
 
       <div className="status-line" aria-live="polite">

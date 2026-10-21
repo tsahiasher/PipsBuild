@@ -583,11 +583,20 @@ kbd {
   .tray {
     border-top: 0;
     border-left: 1px solid var(--line);
-    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
-    align-content: center;
+    grid-template-columns: repeat(var(--tray-cols, 3), minmax(0, 1fr));
+    align-content: safe center;
     max-height: none;
+    min-height: 0;
+    overflow-y: auto;
+    touch-action: pan-y;
     padding: 16px;
     gap: 8px;
+  }
+  .slot {
+    aspect-ratio: 3 / 2;
+  }
+  .tray-domino {
+    width: 94%;
   }
 }
 @media (min-width: 560px) and (max-aspect-ratio: 5/4) {

@@ -137,9 +137,7 @@ export function App() {
         puzzle={state.active}
         game={game}
         dispatch={dispatchGame}
-        settings={state.settings}
         best={state.bests[state.active.id]}
-        onSettings={(settings) => setState((s) => ({ ...s, settings }))}
         onBack={() => setState((s) => ({ ...s, screen: s.draft ? 'editor' : 'home' }))}
         onPlayAgain={playAgain}
         onImportAnother={goHome}

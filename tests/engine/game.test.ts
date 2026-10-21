@@ -26,13 +26,11 @@ describe('repair mode and completion', () => {
     // 4 lands in the left column whose sum must be 3: already impossible.
     const s = run(newGame(p), { type: 'place', dominoId: 'd2', cellA: '0,1', cellB: '0,0', now: 1 });
     expect(s.validationMode).toBe('normal');
-    expect(visibleErrors(p, s, false).size).toBe(0);
-    // Optional live validation shows impossible regions early.
-    expect(visibleErrors(p, s, true).size).toBeGreaterThan(0);
+    expect(visibleErrors(p, s).size).toBe(0);
   });
 
   it('24. violated conditions show the error state in repair mode', () => {
-    expect([...visibleErrors(p, wrongFull(), false)].sort()).toEqual(['r1', 'r2']);
+    expect([...visibleErrors(p, wrongFull())].sort()).toEqual(['r1', 'r2']);
   });
 
   it('25. a corrected condition loses its error', () => {

@@ -121,8 +121,8 @@ export function gameReducer(puzzle: Puzzle, state: GameState, action: GameAction
 }
 
 /** Region ids that should display a red error dot. */
-export function visibleErrors(puzzle: Puzzle, state: GameState, showWhilePlaying: boolean): Set<string> {
+export function visibleErrors(puzzle: Puzzle, state: GameState): Set<string> {
   if (state.solved) return new Set();
-  if (state.validationMode !== 'repair' && !showWhilePlaying) return new Set();
+  if (state.validationMode !== 'repair') return new Set();
   return violatedRegions(puzzle, state.placements);
 }

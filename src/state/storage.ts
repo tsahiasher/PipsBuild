@@ -4,10 +4,6 @@ import type { RecognitionResult } from '../vision/recognize';
 
 export type RecognitionMeta = Omit<RecognitionResult, 'puzzle'>;
 
-export interface Settings {
-  showValidationWhilePlaying: boolean;
-}
-
 /** Fastest solve of a puzzle and how many times it has been solved. */
 export interface BestTime {
   ms: number;
@@ -22,7 +18,6 @@ export interface StoredState {
   active: Puzzle | null;
   /** Games keyed by puzzle id, so leaving and re-entering a puzzle keeps its timer. */
   games: Record<string, GameState>;
-  settings: Settings;
   /** Best times keyed by puzzle id. */
   bests: Record<string, BestTime>;
   screen: 'home' | 'editor' | 'play';
@@ -38,7 +33,6 @@ export const defaultState = (): StoredState => ({
   recognition: null,
   active: null,
   games: {},
-  settings: { showValidationWhilePlaying: false },
   bests: {},
   screen: 'home',
   savedAt: Date.now(),

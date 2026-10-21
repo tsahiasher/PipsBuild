@@ -38,10 +38,9 @@ describe('loading a game saved by an older version', () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it('keeps the game and the settings, and starts with no best times', () => {
+  it('keeps the game, and starts with no best times', () => {
     store.set(KEY, JSON.stringify(oldSave));
     const s = loadState();
-    expect(s.settings).toEqual({ showValidationWhilePlaying: true });
     expect(s.bests).toEqual({});
     expect(s.games[puzzle.id].placements).toEqual(oldSave.games[puzzle.id].placements);
   });
