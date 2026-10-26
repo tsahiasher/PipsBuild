@@ -29,6 +29,14 @@ export async function loadImageFile(file: Blob): Promise<LoadedImage> {
 
 async function decode(file: Blob): Promise<ImageBitmap | HTMLImageElement> {
   if (typeof createImageBitmap === 'function') {
+    // Screenshots carry an ICC profile. Firefox converts such pixels to sRGB by default, which
+    // washes out the teal badges (chroma 29 -> 19) below the strong-colour threshold; the
+    // recogniser is tuned for the raw pixels that Chrome and the Node tests see.
+    try {
+      return await createImageBitmap(file, { colorSpaceConversion: 'none' });
+    } catch {
+      /* option unsupported: fall back to the default decode */
+    }
     try {
       return await createImageBitmap(file);
     } catch {

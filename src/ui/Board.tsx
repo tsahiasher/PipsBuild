@@ -108,7 +108,7 @@ export const Board = forwardRef<SVGSVGElement, Props>(function Board(
             <path d={fill} fill={col.fill} stroke={col.fill} strokeWidth={8} strokeLinejoin="round" fillRule="evenodd" />
             {region.cells.map((id) => {
               const { row, col: c } = parseCellId(id);
-              return <rect key={id} x={c * U + 13} y={row * U + 13} width={U - 26} height={U - 26} rx={12} fill="#fff" opacity={0.16} />;
+              return <rect key={id} x={c * U + 13} y={row * U + 13} width={U - 26} height={U - 26} rx={12} fill="#fff" opacity={0.06} />;
             })}
             <path
               d={dash}

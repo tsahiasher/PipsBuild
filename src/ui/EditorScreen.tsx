@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { boardComponents, cellId } from '../engine/geometry';
 import { checkConsistency, makeCells, normalizePuzzle } from '../engine/puzzle';
 import { serializePuzzle } from '../engine/puzzleFile';
@@ -41,6 +41,8 @@ const CONSTRAINT_TYPES: { id: ConstraintType | 'none'; label: string }[] = [
   { id: 'neq', label: 'All different' },
 ];
 
+const MAX_ZOOM = 5;
+
 export function EditorScreen({ draft, recognition, image, onChange, onStart, onHome }: Props) {
   const [tool, setTool] = useState<Tool>(recognition ? 'select' : 'cells');
   const [view, setView] = useState<View>('board');
@@ -48,7 +50,10 @@ export function EditorScreen({ draft, recognition, image, onChange, onStart, onH
   const [imgOpacity, setImgOpacity] = useState(1);
   const [overlayOpacity, setOverlayOpacity] = useState(0.6);
   const [showDominoBoxes, setShowDominoBoxes] = useState(true);
+  const [zoom, setZoom] = useState(1);
   const svgRef = useRef<SVGSVGElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const zoomFocus = useRef({ x: 0.5, y: 0.5 });
   const gesture = useRef<{ mode: 'add' | 'remove'; visited: Set<CellId> } | null>(null);
   const draftRef = useRef(draft);
   draftRef.current = draft;
@@ -187,6 +192,19 @@ export function EditorScreen({ draft, recognition, image, onChange, onStart, onH
     });
 
   // ---------- render ----------
+  // Zooming only affects the Compare canvas; keep the point at its centre in view.
+  const changeZoom = (z: number) => {
+    const w = wrapRef.current;
+    if (w) zoomFocus.current = { x: (w.scrollLeft + w.clientWidth / 2) / w.scrollWidth, y: (w.scrollTop + w.clientHeight / 2) / w.scrollHeight };
+    setZoom(Math.min(MAX_ZOOM, Math.max(1, z)));
+  };
+  useLayoutEffect(() => {
+    const w = wrapRef.current;
+    if (!w) return;
+    w.scrollLeft = zoomFocus.current.x * w.scrollWidth - w.clientWidth / 2;
+    w.scrollTop = zoomFocus.current.y * w.scrollHeight - w.clientHeight / 2;
+  }, [zoom, view]);
+  const zoomed = view === 'overlay' && zoom > 1;
   const pct = (v: number) => `${Math.round(v * 100)}%`;
   const conf = recognition?.confidence;
 
@@ -240,7 +258,8 @@ export function EditorScreen({ draft, recognition, image, onChange, onStart, onH
             </div>
           )}
           <div
-            className="canvas-wrap"
+            ref={wrapRef}
+            className={`canvas-wrap${zoomed ? ' zoomed' : ''}`}
             style={{
               // Size the canvas to the content's shape so phones don't show empty bands.
               aspectRatio:
@@ -253,6 +272,7 @@ export function EditorScreen({ draft, recognition, image, onChange, onStart, onH
               <svg
                 ref={svgRef}
                 className="editor-svg"
+                style={{ width: `${zoom * 100}%`, height: `${zoom * 100}%`, touchAction: tool === 'select' && zoom > 1 ? 'pan-x pan-y' : 'none' }}
                 viewBox={`0 0 ${recognition.imageWidth} ${recognition.imageHeight}`}
                 preserveAspectRatio="xMidYMid meet"
                 onPointerDown={onPointerDown}
@@ -300,6 +320,11 @@ export function EditorScreen({ draft, recognition, image, onChange, onStart, onH
                 <span>Overlay</span>
                 <input type="range" min={0} max={1} step={0.05} value={overlayOpacity} onChange={(e) => setOverlayOpacity(Number(e.target.value))} />
                 <span className="num">{pct(overlayOpacity)}</span>
+              </label>
+              <label className="slider">
+                <span>Zoom</span>
+                <input type="range" min={1} max={MAX_ZOOM} step={0.25} value={zoom} onChange={(e) => changeZoom(Number(e.target.value))} />
+                <span className="num">{zoom.toFixed(zoom % 1 ? 2 : 0).replace(/0$/, '')}×</span>
               </label>
               <label className="check small">
                 <input type="checkbox" checked={showDominoBoxes} onChange={(e) => setShowDominoBoxes(e.target.checked)} />
