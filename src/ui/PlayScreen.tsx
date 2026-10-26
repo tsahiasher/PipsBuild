@@ -3,7 +3,8 @@ import { formatTime, timerElapsed, timerRunning, visibleErrors, type GameAction,
 import { anchorOf, cellId, parseCellId, rotationOf } from '../engine/geometry';
 import { canPlaceDomino, placementFor, rotatePlacement } from '../engine/placement';
 import { describeConstraint } from '../engine/constraints';
-import type { CellId, Placement, Puzzle, Rotation } from '../engine/types';
+import { countSolutions } from '../engine/solver';
+import type { CellId, Placement, Placements, Puzzle, Rotation } from '../engine/types';
 import type { BestTime } from '../state/storage';
 import { Board, boardToClient, boardViewBox, clientToBoard } from './Board';
 import { DominoShape, dominoAriaLabel, dominoTransform } from './Domino';
@@ -11,6 +12,7 @@ import { Confetti } from './Confetti';
 import { SelectedDomino } from './SelectedDomino';
 import { placementCenter } from './boardGeometry';
 import { Dialog } from './Dialog';
+import { SOLVE_FLAG } from './flags';
 import { U } from './theme';
 
 const SELECT_TIMEOUT_MS = 2000;
@@ -18,6 +20,10 @@ const DRAG_THRESHOLD_PX = 6;
 const RETURN_MS = 220;
 /** Duration of the quarter-turn animation; keep in step with `.board-domino.is-selected` in styles.css. */
 const TURN_MS = 180;
+/** Solve animation: how long a domino takes to fly from the tray to the board, and the pause between steps. */
+const FLY_MS = 650;
+const STEP_PAUSE_MS = 280;
+const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
 
 type Source = 'tray' | 'board';
 
@@ -39,6 +45,8 @@ interface Drag {
   preview: Preview | null;
   /** Client-space centre the piece animates back to after an illegal drop. */
   returning: { x: number; y: number } | null;
+  /** Duration of that animation (default `RETURN_MS`). */
+  flyMs?: number;
   /** Dragged out of a rotation selection: where (and how rotated) it goes back to on an illegal drop. */
   revertTo: Placement | null;
 }
@@ -80,11 +88,14 @@ interface Props {
   onBack: () => void;
   onPlayAgain: () => void;
   onImportAnother: () => void;
+  /** Start solving as soon as the screen opens (Solve pressed in the editor). */
+  autoSolve?: boolean;
+  onAutoSolveStarted?: () => void;
   /** Fastest solve of this puzzle so far (including the one just finished). */
   best?: BestTime;
 }
 
-export function PlayScreen({ puzzle, game, dispatch, onBack, onPlayAgain, onImportAnother, best }: Props) {
+export function PlayScreen({ puzzle, game, dispatch, onBack, onPlayAgain, onImportAnother, autoSolve, onAutoSolveStarted, best }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const trayRef = useRef<HTMLDivElement>(null);
@@ -379,7 +390,7 @@ export function PlayScreen({ puzzle, game, dispatch, onBack, onPlayAgain, onImpo
   );
 
   const onPiecePointerDown = (e: ReactPointerEvent<Element>, id: string, source: Source) => {
-    if (game.solved || pending.current || dragRef.current) return;
+    if (game.solved || pending.current || dragRef.current || solvingRef.current) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     setKbd(null);
     if (selection && selection.id !== id) clearSelection();
@@ -548,6 +559,106 @@ export function PlayScreen({ puzzle, game, dispatch, onBack, onPlayAgain, onImpo
     );
   }
 
+  // ---------- solve (?solve=1): plays the engine's solution out, domino by domino ----------
+  const [solving, setSolving] = useState(false);
+  const solvingRef = useRef(false);
+  const solveRun = useRef(0);
+  const solution = useRef<{ puzzleId: string; placements: Placements } | null>(null);
+  const [solveNote, setSolveNote] = useState('');
+
+  const stopSolving = useCallback(() => {
+    solveRun.current++; // ends the running loop at its next step
+    solvingRef.current = false;
+    setSolving(false);
+    dragRef.current = null;
+    setDrag(null);
+  }, []);
+
+  const startSolving = useCallback(async () => {
+    const run = ++solveRun.current;
+    const alive = () => solveRun.current === run;
+    clearSelection();
+    setKbd(null);
+    setSolveNote('');
+    solvingRef.current = true;
+    setSolving(true);
+    await sleep(0); // let the first render show the Stop button before the (possibly slow) search
+
+    // Find the solution once; stopping and solving again carries on with the same one.
+    if (solution.current?.puzzleId !== puzzle.id) {
+      const found = countSolutions(puzzle, { maxSolutions: 1, maxMs: 4000, collect: true });
+      const first = found.solutions?.[0];
+      if (!first) {
+        setSolveNote(found.reason ?? (found.complete ? 'This puzzle has no solution.' : 'No solution found in time.'));
+        stopSolving();
+        return;
+      }
+      solution.current = { puzzleId: puzzle.id, placements: first };
+    }
+    const target = solution.current.placements;
+
+    // A board that has left the solution (the player moved things) starts over from an empty one.
+    const off = Object.entries(gameRef.current.placements).some(([id, p]) => {
+      const t = target[id];
+      return !t || t.cellA !== p.cellA || t.cellB !== p.cellB;
+    });
+    if (off) {
+      dispatch({ type: 'reset', now: Date.now() });
+      await sleep(STEP_PAUSE_MS);
+    }
+
+    for (const d of puzzle.dominoes) {
+      if (!alive()) return;
+      if (gameRef.current.placements[d.id]) continue;
+      const want = target[d.id];
+      const wantRot = rotationOf(want.cellA, want.cellB) ?? 0;
+
+      // Turn it in the tray (animated by the tray's own transition).
+      for (let i = 0; i < 4 && (gameRef.current.trayRotation[d.id] ?? 0) !== wantRot; i++) {
+        dispatch({ type: 'rotateTray', dominoId: d.id });
+        await sleep(TURN_MS + 120);
+        if (!alive()) return;
+      }
+
+      // Fly it to its place: the drag ghost starts over the tray slot and slides to the board.
+      const slot = slotRefs.current.get(d.id)?.getBoundingClientRect();
+      const svg = svgRef.current;
+      if (slot && svg) {
+        const c = placementCenter(want);
+        const to = boardToClient(svg, vb, c.x, c.y);
+        const from = { x: slot.left + slot.width / 2, y: slot.top + slot.height / 2 };
+        const base: Drag = { id: d.id, source: 'tray', rot: wantRot, x: 0, y: 0, fx: 0, fy: 0, cellPx: cellPx(), preview: null, returning: from, revertTo: null, flyMs: FLY_MS };
+        dragRef.current = base;
+        setDrag(base);
+        await sleep(40);
+        if (!alive()) return;
+        const flying = { ...base, returning: { x: to.x, y: to.y } };
+        dragRef.current = flying;
+        setDrag(flying);
+        await sleep(FLY_MS + 40);
+        if (!alive()) return;
+      }
+      dispatch({ type: 'place', dominoId: d.id, cellA: want.cellA, cellB: want.cellB, now: Date.now() });
+      dragRef.current = null;
+      setDrag(null);
+      await sleep(STEP_PAUSE_MS);
+    }
+    if (alive()) {
+      solvingRef.current = false;
+      setSolving(false);
+    }
+  }, [clearSelection, dispatch, puzzle, stopSolving, vb]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (SOLVE_FLAG && autoSolve) {
+      onAutoSolveStarted?.();
+      void startSolving();
+    }
+    return () => {
+      solveRun.current++;
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const violated = puzzle.regions.filter((r) => errors.has(r.id));
   const placedCount = Object.keys(game.placements).length;
   const solvedTime = timerElapsed(game.timer, Date.now());
@@ -565,10 +676,15 @@ export function PlayScreen({ puzzle, game, dispatch, onBack, onPlayAgain, onImpo
           {formatTime(elapsed)}
         </div>
         <div className="row gap-sm">
+          {SOLVE_FLAG && !game.solved && (
+            <button className="btn" onClick={() => (solving ? stopSolving() : void startSolving())}>
+              {solving ? 'Stop' : 'Solve'}
+            </button>
+          )}
           <button
             className="btn ghost"
             onClick={() => (game.moves > 0 || placedCount > 0 ? setConfirmReset(true) : dispatch({ type: 'reset', now: Date.now() }))}
-            disabled={game.solved}
+            disabled={game.solved || solving}
           >
             Reset
           </button>
@@ -576,7 +692,9 @@ export function PlayScreen({ puzzle, game, dispatch, onBack, onPlayAgain, onImpo
       </header>
 
       <div className="status-line" aria-live="polite">
-        {game.solved
+        {solveNote
+          ? solveNote
+          : game.solved
           ? 'Solved!'
           : violated.length > 0
             ? `${violated.length} condition${violated.length > 1 ? 's' : ''} not satisfied (marked with a red dot)`
@@ -766,7 +884,7 @@ function DragGhost({ drag, domino }: { drag: Drag; domino: { a: number; b: numbe
         width: w,
         height: h,
         transform: `translate(${cx - w / 2}px, ${cy - h / 2}px) rotate(${drag.rot * 90}deg) scale(${drag.returning ? 1 : 1.06})`,
-        transitionDuration: drag.returning ? `${RETURN_MS}ms` : '0ms',
+        transitionDuration: drag.returning ? `${drag.flyMs ?? RETURN_MS}ms` : '0ms',
       }}
       aria-hidden
     >

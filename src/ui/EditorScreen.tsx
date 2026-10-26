@@ -9,6 +9,7 @@ import type { RecognitionMeta } from '../state/storage';
 import { Board, boardViewBox, clientToBoard } from './Board';
 import { DominoShape } from './Domino';
 import { SolveBanner } from './SolveBanner';
+import { SOLVE_FLAG } from './flags';
 import { useSolvability } from './useSolvability';
 import { REGION_COLORS, U, regionColor } from './theme';
 
@@ -20,7 +21,7 @@ interface Props {
   recognition: RecognitionMeta | null;
   image: string | null;
   onChange: (p: Puzzle) => void;
-  onStart: (p: Puzzle) => void;
+  onStart: (p: Puzzle, solve?: boolean) => void;
   onHome: () => void;
 }
 
@@ -212,9 +213,16 @@ export function EditorScreen({ draft, recognition, image, onChange, onStart, onH
             ← Back
           </button>
           <h1 className="h3 title">{recognition ? 'Check the puzzle' : 'Build the puzzle'}</h1>
-          <button className="btn primary" disabled={errors.length > 0} onClick={() => onStart(draft)}>
-            Start puzzle
-          </button>
+          <div className="row gap-sm">
+            {SOLVE_FLAG && (
+              <button className="btn" disabled={errors.length > 0} onClick={() => onStart(draft, true)}>
+                Solve
+              </button>
+            )}
+            <button className="btn primary" disabled={errors.length > 0} onClick={() => onStart(draft)}>
+              Start puzzle
+            </button>
+          </div>
         </header>
         <SolveBanner state={solvability} />
       </div>

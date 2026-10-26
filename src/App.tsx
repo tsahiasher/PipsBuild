@@ -20,6 +20,8 @@ export function App() {
   const [image, setImage] = useState<string | null>(loadImage);
   const [progress, setProgress] = useState<ImportProgress | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  /** The next play screen starts solving by itself (Solve pressed in the editor). */
+  const [autoSolve, setAutoSolve] = useState(false);
   const latest = useRef(state);
   latest.current = state;
 
@@ -83,7 +85,8 @@ export function App() {
     }
   }, []);
 
-  const startPuzzle = useCallback((draft: Puzzle) => {
+  const startPuzzle = useCallback((draft: Puzzle, solve = false) => {
+    setAutoSolve(solve);
     const puzzle = normalizePuzzle(draft);
     setState((s) => ({
       ...s,
@@ -139,6 +142,8 @@ export function App() {
         dispatch={dispatchGame}
         best={state.bests[state.active.id]}
         onBack={() => setState((s) => ({ ...s, screen: s.draft ? 'editor' : 'home' }))}
+        autoSolve={autoSolve}
+        onAutoSolveStarted={() => setAutoSolve(false)}
         onPlayAgain={playAgain}
         onImportAnother={goHome}
       />
