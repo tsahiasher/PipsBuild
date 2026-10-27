@@ -345,7 +345,7 @@ export function PlayScreen({ puzzle, game, dispatch, onBack, onPlayAgain, onImpo
       const tray = trayRef.current?.getBoundingClientRect();
       const overTray = tray && e.clientX >= tray.left && e.clientX <= tray.right && e.clientY >= tray.top && e.clientY <= tray.bottom;
       if (overTray && d.source === 'board' && e.type !== 'pointercancel') {
-        dispatch({ type: 'returnToTray', dominoId: d.id, now, rotation: d.rot });
+        dispatch({ type: 'returnToTray', dominoId: d.id, now, rotation: 0 });
         setAnnounce('Returned to the tray.');
         dragRef.current = null;
         setDrag(null);
@@ -494,8 +494,7 @@ export function PlayScreen({ puzzle, game, dispatch, onBack, onPlayAgain, onImpo
       }
     } else if ((key === 'Delete' || key === 'Backspace') && source === 'board') {
       e.preventDefault();
-      const p = game.placements[id];
-      dispatch({ type: 'returnToTray', dominoId: id, now: Date.now(), rotation: p ? rotationOf(p.cellA, p.cellB) ?? 0 : 0 });
+      dispatch({ type: 'returnToTray', dominoId: id, now: Date.now(), rotation: 0 });
       setAnnounce('Returned to the tray.');
     }
   };
