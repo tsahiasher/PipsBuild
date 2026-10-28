@@ -1,4 +1,4 @@
-/** Original region palette: pastel fill + strong accent (border & badge). */
+/** Original region palette: fill (measured from real screenshots) + strong accent (border & badge). */
 export interface RegionColor {
   name: string;
   fill: string;
@@ -6,14 +6,14 @@ export interface RegionColor {
 }
 
 export const REGION_COLORS: RegionColor[] = [
-  { name: 'Lilac', fill: '#d4bfe0', accent: '#7446a6' },
-  { name: 'Rose', fill: '#f4bccb', accent: '#c02c68' },
-  { name: 'Lagoon', fill: '#acd9d3', accent: '#11807b' },
-  { name: 'Apricot', fill: '#f7d2a6', accent: '#c45f16' },
-  { name: 'Slate', fill: '#bcc1d3', accent: '#2c4778' },
-  { name: 'Moss', fill: '#cdd39f', accent: '#587a1b' },
-  { name: 'Sky', fill: '#bcd8f4', accent: '#2468b4' },
-  { name: 'Sand', fill: '#e9d8a8', accent: '#8a6a17' },
+  { name: 'Lilac', fill: '#c3a3bc', accent: '#7446a6' },
+  { name: 'Rose', fill: '#e6a0ac', accent: '#c02c68' },
+  { name: 'Lagoon', fill: '#9bbfbf', accent: '#11807b' },
+  { name: 'Apricot', fill: '#e8bd8e', accent: '#c45f16' },
+  { name: 'Slate', fill: '#a1a1ad', accent: '#2c4778' },
+  { name: 'Moss', fill: '#b4b389', accent: '#587a1b' },
+  { name: 'Sky', fill: '#9fbde0', accent: '#2468b4' },
+  { name: 'Sand', fill: '#dcc58a', accent: '#8a6a17' },
 ];
 
 export const regionColor = (i: number): RegionColor => REGION_COLORS[((i % REGION_COLORS.length) + REGION_COLORS.length) % REGION_COLORS.length];
