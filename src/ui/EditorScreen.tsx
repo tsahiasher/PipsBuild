@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { boardComponents, cellId } from '../engine/geometry';
 import { checkConsistency, makeCells, normalizePuzzle } from '../engine/puzzle';
 import { serializePuzzle } from '../engine/puzzleFile';
@@ -15,6 +15,9 @@ import { REGION_COLORS, U, regionColor } from './theme';
 
 type Tool = 'cells' | 'paint' | 'erase' | 'select';
 type View = 'board' | 'overlay';
+
+/** How far the compare view can zoom in (pinch). */
+const MAX_ZOOM = 6;
 
 interface Props {
   draft: Puzzle;
@@ -45,7 +48,6 @@ export function EditorScreen({ draft, recognition, image, onChange, onStart, onH
   const [tool, setTool] = useState<Tool>(recognition ? 'select' : 'cells');
   const [view, setView] = useState<View>('board');
   const [selected, setSelected] = useState<string | null>(null);
-  const [imgOpacity, setImgOpacity] = useState(1);
   const [overlayOpacity, setOverlayOpacity] = useState(0.6);
   const [showDominoBoxes, setShowDominoBoxes] = useState(true);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -93,10 +95,7 @@ export function EditorScreen({ draft, recognition, image, onChange, onStart, onH
     let x: number;
     let y: number;
     if (view === 'overlay' && recognition) {
-      const rect = svg.getBoundingClientRect();
-      const s = Math.min(rect.width / recognition.imageWidth, rect.height / recognition.imageHeight);
-      const ix = (e.clientX - rect.left - (rect.width - recognition.imageWidth * s) / 2) / s;
-      const iy = (e.clientY - rect.top - (rect.height - recognition.imageHeight * s) / 2) / s;
+      const { x: ix, y: iy } = imagePointAt(zoomRef.current, svg, e.clientX, e.clientY);
       x = ((ix - recognition.geometry.originX) / recognition.geometry.pitch) * U;
       y = ((iy - recognition.geometry.originY) / recognition.geometry.pitch) * U;
     } else {
@@ -111,6 +110,8 @@ export function EditorScreen({ draft, recognition, image, onChange, onStart, onH
   };
 
   const onPointerDown = (e: ReactPointerEvent<SVGSVGElement>) => {
+    if (trackPointer(e)) return;
+    if (tool === 'select' && view === 'overlay' && zoomRef.current.z > 1) dragPan.current = { x: e.clientX, y: e.clientY };
     const id = cellAtPointer(e);
     if (!id) return;
     if (tool === 'select') {
@@ -119,7 +120,6 @@ export function EditorScreen({ draft, recognition, image, onChange, onStart, onH
       return;
     }
     if (tool === 'paint' && !selected) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
     const playable = draft.cells.some((c) => c.id === id);
     const inSelected = !!selectedRegion?.cells.includes(id);
     const mode: 'add' | 'remove' = tool === 'cells' ? (playable ? 'remove' : 'add') : tool === 'paint' && inSelected ? 'remove' : 'add';
@@ -128,6 +128,13 @@ export function EditorScreen({ draft, recognition, image, onChange, onStart, onH
   };
 
   const onPointerMove = (e: ReactPointerEvent<SVGSVGElement>) => {
+    if (movePinch(e)) return;
+    const dp = dragPan.current;
+    if (dp) {
+      panBy(dp.x - e.clientX, dp.y - e.clientY);
+      dragPan.current = { x: e.clientX, y: e.clientY };
+      return;
+    }
     const g = gesture.current;
     if (!g) return;
     const id = cellAtPointer(e);
@@ -136,7 +143,10 @@ export function EditorScreen({ draft, recognition, image, onChange, onStart, onH
     applyCell(id, g.mode);
   };
 
-  const endGesture = () => (gesture.current = null);
+  const endGesture = (e: ReactPointerEvent<SVGSVGElement>) => {
+    releasePointer(e);
+    gesture.current = null;
+  };
 
   const addRegion = () => {
     const used = draft.regions.map((r) => r.color);
@@ -185,6 +195,112 @@ export function EditorScreen({ draft, recognition, image, onChange, onStart, onH
       while (p.dominoes.some((d) => d.id === `d${n}`)) n++;
       return { ...p, dominoes: [...p.dominoes, { id: `d${n}`, a: pair[0], b: pair[1] }] };
     });
+
+
+  // ---------- compare view: pinch to zoom ----------
+  const [zoom, setZoom] = useState({ z: 1, x: 0, y: 0 }); // x, y: top-left of the visible part, in screenshot pixels
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{ dist: number; z: number; ix: number; iy: number } | null>(null);
+  /** One pointer dragging the zoomed image (only with the Select tool, which edits nothing). */
+  const dragPan = useRef<{ x: number; y: number } | null>(null);
+  useEffect(() => setZoom({ z: 1, x: 0, y: 0 }), [view]);
+
+  const viewBoxOf = (z: { z: number; x: number; y: number }) => {
+    const W = recognition?.imageWidth ?? 1;
+    const H = recognition?.imageHeight ?? 1;
+    return { x: z.x, y: z.y, w: W / z.z, h: H / z.z };
+  };
+  /** Screenshot pixel under a client point at the given zoom. */
+  const imagePointAt = (z: { z: number; x: number; y: number }, svg: SVGSVGElement, cx: number, cy: number) => {
+    const vb = viewBoxOf(z);
+    const rect = svg.getBoundingClientRect();
+    const s = Math.min(rect.width / vb.w, rect.height / vb.h);
+    return { x: vb.x + (cx - rect.left - (rect.width - vb.w * s) / 2) / s, y: vb.y + (cy - rect.top - (rect.height - vb.h * s) / 2) / s };
+  };
+  /** Zoom to `z` keeping screenshot point (ix, iy) under the client point (cx, cy). */
+  const zoomTo = (z: number, ix: number, iy: number, cx: number, cy: number) => {
+    const svg = svgRef.current;
+    if (!svg || !recognition) return;
+    const W = recognition.imageWidth;
+    const H = recognition.imageHeight;
+    const zz = Math.min(MAX_ZOOM, Math.max(1, z));
+    const w = W / zz;
+    const h = H / zz;
+    const rect = svg.getBoundingClientRect();
+    const s = Math.min(rect.width / w, rect.height / h);
+    const x = ix - (cx - rect.left - (rect.width - w * s) / 2) / s;
+    const y = iy - (cy - rect.top - (rect.height - h * s) / 2) / s;
+    setZoom({ z: zz, x: Math.min(W - w, Math.max(0, x)), y: Math.min(H - h, Math.max(0, y)) });
+  };
+
+  // Trackpad pinch (and ctrl + wheel) arrives as a wheel event with ctrlKey set; the browser would zoom the page.
+  const wheelRef = useRef<(e: WheelEvent) => void>(() => {});
+  wheelRef.current = (e) => {
+    const svg = svgRef.current;
+    if (view !== 'overlay' || !svg) return;
+    const cur = zoomRef.current;
+    if (e.ctrlKey) {
+      e.preventDefault();
+      const p = imagePointAt(cur, svg, e.clientX, e.clientY);
+      zoomTo(cur.z * Math.exp(-e.deltaY * 0.01), p.x, p.y, e.clientX, e.clientY);
+    } else if (cur.z > 1) {
+      // Zoomed in: the wheel moves the view. At the edge it lets the page scroll on instead.
+      const moved = panBy(e.deltaX, e.deltaY);
+      if (moved) e.preventDefault();
+    }
+  };
+  /** Moves the zoomed view by a number of screen pixels; false when it is already at that edge. */
+  const panBy = (dx: number, dy: number): boolean => {
+    const svg = svgRef.current;
+    const cur = zoomRef.current;
+    if (!svg || !recognition || cur.z <= 1) return false;
+    const vb = viewBoxOf(cur);
+    const rect = svg.getBoundingClientRect();
+    const s = Math.min(rect.width / vb.w, rect.height / vb.h);
+    const x = Math.min(recognition.imageWidth - vb.w, Math.max(0, cur.x + dx / s));
+    const y = Math.min(recognition.imageHeight - vb.h, Math.max(0, cur.y + dy / s));
+    if (x === cur.x && y === cur.y) return false;
+    setZoom({ z: cur.z, x, y });
+    return true;
+  };
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg || view !== 'overlay') return;
+    const onWheel = (e: WheelEvent) => wheelRef.current(e);
+    svg.addEventListener('wheel', onWheel, { passive: false });
+    return () => svg.removeEventListener('wheel', onWheel);
+  }, [view]);
+
+  const trackPointer = (e: ReactPointerEvent<SVGSVGElement>): boolean => {
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (view !== 'overlay') return false;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    if (pointers.current.size !== 2) return false;
+    // A second finger turns whatever the first one was doing into a pinch.
+    gesture.current = null;
+    const [a, b] = [...pointers.current.values()];
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const p = imagePointAt(zoomRef.current, e.currentTarget, mid.x, mid.y);
+    pinch.current = { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, z: zoomRef.current.z, ix: p.x, iy: p.y };
+    return true;
+  };
+  const movePinch = (e: ReactPointerEvent<SVGSVGElement>): boolean => {
+    if (!pointers.current.has(e.pointerId)) return !!pinch.current;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const pz = pinch.current;
+    if (!pz || pointers.current.size < 2) return !!pz;
+    dragPan.current = null;
+    const [a, b] = [...pointers.current.values()];
+    zoomTo((pz.z * Math.hypot(a.x - b.x, a.y - b.y)) / pz.dist, pz.ix, pz.iy, (a.x + b.x) / 2, (a.y + b.y) / 2);
+    return true;
+  };
+  const releasePointer = (e: ReactPointerEvent<SVGSVGElement>) => {
+    pointers.current.delete(e.pointerId);
+    dragPan.current = null;
+    if (pointers.current.size < 2) pinch.current = null;
+  };
 
   // ---------- render ----------
   const pct = (v: number) => `${Math.round(v * 100)}%`;
@@ -253,14 +369,15 @@ export function EditorScreen({ draft, recognition, image, onChange, onStart, onH
               <svg
                 ref={svgRef}
                 className="editor-svg"
-                viewBox={`0 0 ${recognition.imageWidth} ${recognition.imageHeight}`}
+                viewBox={`${viewBoxOf(zoom).x} ${viewBoxOf(zoom).y} ${viewBoxOf(zoom).w} ${viewBoxOf(zoom).h}`}
                 preserveAspectRatio="xMidYMid meet"
+                style={{ touchAction: zoom.z > 1 ? 'none' : 'pan-y' }}
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
                 onPointerUp={endGesture}
                 onPointerCancel={endGesture}
               >
-                <image href={image} width={recognition.imageWidth} height={recognition.imageHeight} opacity={imgOpacity} />
+                <image href={image} width={recognition.imageWidth} height={recognition.imageHeight} />
                 <g
                   opacity={overlayOpacity}
                   transform={`translate(${recognition.geometry.originX} ${recognition.geometry.originY}) scale(${recognition.geometry.pitch / U})`}
@@ -291,11 +408,6 @@ export function EditorScreen({ draft, recognition, image, onChange, onStart, onH
           </div>
           {view === 'overlay' && (
             <div className="sliders">
-              <label className="slider">
-                <span>Original</span>
-                <input type="range" min={0} max={1} step={0.05} value={imgOpacity} onChange={(e) => setImgOpacity(Number(e.target.value))} />
-                <span className="num">{pct(imgOpacity)}</span>
-              </label>
               <label className="slider">
                 <span>Overlay</span>
                 <input type="range" min={0} max={1} step={0.05} value={overlayOpacity} onChange={(e) => setOverlayOpacity(Number(e.target.value))} />

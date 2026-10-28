@@ -737,6 +737,9 @@ kbd {
   .editor-canvas {
     position: sticky;
     top: 108px; /* below the sticky top bar + solvability strip */
+    /* Taller than the window? Scroll inside the card so nothing is out of reach. */
+    max-height: calc(100dvh - 120px);
+    overflow-y: auto;
   }
 }
 .editor-canvas {
