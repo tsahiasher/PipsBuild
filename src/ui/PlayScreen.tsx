@@ -347,8 +347,22 @@ export function PlayScreen({ puzzle, game, dispatch, onBack, onPlayAgain, onImpo
       if (overTray && d.source === 'board' && e.type !== 'pointercancel') {
         dispatch({ type: 'returnToTray', dominoId: d.id, now, rotation: 0 });
         setAnnounce('Returned to the tray.');
-        dragRef.current = null;
-        setDrag(null);
+        // Turn the piece upright and glide it into its own tray slot.
+        const slot = slotRefs.current.get(d.id)?.getBoundingClientRect();
+        if (!slot) {
+          dragRef.current = null;
+          setDrag(null);
+          return;
+        }
+        const home = { ...d, rot: 0 as Rotation, preview: null, returning: { x: slot.left + slot.width / 2, y: slot.top + slot.height / 2 } };
+        dragRef.current = home;
+        setDrag(home);
+        window.setTimeout(() => {
+          if (dragRef.current === home) {
+            dragRef.current = null;
+            setDrag(null);
+          }
+        }, RETURN_MS + 30);
         return;
       }
       // Illegal drop: animate back to where the piece came from.
