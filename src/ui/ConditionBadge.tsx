@@ -20,7 +20,7 @@ export function ConditionBadge({ constraint, invalid, x, y, color, selected }: P
   const label = constraintLabel(constraint);
   const desc = describeConstraint(constraint);
   const aria = invalid ? `Region condition ${label} is not satisfied. ${desc}.` : `${desc}.`;
-  const size = label.length >= 3 ? 20 : label.length === 2 ? 24 : 29;
+  const size = label.length >= 3 ? 25 : label.length === 2 ? 32 : 38;
   // Place the baseline so the ink is centred: digits are ~0.71em tall (cap height);
   // "=" / "≠" sit on the maths axis, a little lower.
   const baseline = size * (/\d/.test(label) ? 0.355 : 0.3);

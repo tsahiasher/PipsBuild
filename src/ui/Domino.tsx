@@ -43,7 +43,7 @@ export const DominoShape = memo(function DominoShape({ a, b, look = 'normal', tr
         height={88}
         rx={17}
         fill={fill}
-        fillOpacity={translucent ? 0.8 : 1}
+        fillOpacity={translucent ? 0.5 : 1}
         stroke={stroke}
         strokeWidth={strokeWidth}
       />
